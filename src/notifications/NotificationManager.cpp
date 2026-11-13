@@ -21,9 +21,17 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <QImage>
+#include <QWindow>
 
 #include <algorithm>
 #include <utility>
+
+#ifdef KAMINARI_ENABLE_KDE
+#include <KNotification>
+#include <KNotificationAction>
+#include <KNotificationReplyAction>
+#include <KWindowSystem>
+#endif
 
 #ifdef HAVE_QT_DBUS
 #include <QDBusArgument>
@@ -86,7 +94,49 @@ constexpr qint64 kUndecryptableMemoryMs = 10 * 60 * 1000;
 constexpr int kMaxActivationTokens = 16;
 constexpr quint32 kClosedExpired = 1;
 constexpr quint32 kClosedDismissed = 2;
+constexpr quint32 kKdeSyntheticIdMask = 0x80000000u;
 const QChar kKeySeparator(0x1f);
+
+QString brandDisplayName()
+{
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("Kaminari");
+#else
+    return QStringLiteral("Lightning");
+#endif
+}
+
+QString brandText(const QString &text)
+{
+#ifdef KAMINARI_BRANDING
+    static const QRegularExpression word(QStringLiteral("\\bLightning\\b"));
+    QString out = text;
+    out.replace(word, brandDisplayName());
+    return out;
+#else
+    return text;
+#endif
+}
+
+#ifdef KAMINARI_ENABLE_KDE
+QString notifyComponentName()
+{
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("kaminari");
+#else
+    return QStringLiteral("matrix-client");
+#endif
+}
+
+QString kdeAppIconName()
+{
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("kaminari");
+#else
+    return QStringLiteral("lightning");
+#endif
+}
+#endif
 
 // First-strong isolation around an untrusted name spliced into a sentence:
 // a display name with an RLO, or in another script than the sentence, cannot
@@ -363,8 +413,24 @@ NotificationManager::DesktopIdentity NotificationManager::desktopIdentityFor(
             snapDir + QStringLiteral("/meta/gui/lightning.png")).toString();
         return identity;
     }
+#ifdef KAMINARI_BRANDING
+    identity.desktopEntry = QStringLiteral("kaminari");
+#else
     identity.desktopEntry = QStringLiteral("lightning");
+#endif
     return identity;
+}
+
+NotificationManager::~NotificationManager()
+{
+#ifdef KAMINARI_ENABLE_KDE
+    clearKdeNotifications();
+#endif
+}
+
+void NotificationManager::setWindow(QWindow *window)
+{
+    m_window = window;
 }
 
 NotificationManager::NotificationManager(QObject *parent)
@@ -535,7 +601,7 @@ NotificationManager::decide(const TimelineEvent &event, const Context &context)
                                           "New message from %1").arg(sender);
         break;
     case Private:
-        decision.title = QStringLiteral("Lightning");
+        decision.title = brandDisplayName();
         decision.body = QCoreApplication::translate(
             "Notifications", "New Matrix notification");
         break;
@@ -1030,6 +1096,7 @@ void NotificationManager::deliverDecision(const TimelineEvent &event,
     card.sound = decision.playSound && !replacement;
     card.replacement = replacement;
     card.accountKey = accountKey;
+    card.direct = context.roomIsDirect;
     if (context.previewMode != Private) {
         card.fallback = lightning::notifications::fallbackAvatar(
             context.roomName, context.avatarColorKey, kFallbackAvatarEdge,
@@ -1051,7 +1118,8 @@ void NotificationManager::showGeneric(const QString &title,
                                       const QString &roomId,
                                       const QString &avatarMxc, bool sound,
                                       const QString &key,
-                                      const QString &accountUserId)
+                                      const QString &accountUserId,
+                                      const QString &notifyEvent)
 {
     ++m_genericNoticeCount;
     QVariantMap payload;
@@ -1071,6 +1139,7 @@ void NotificationManager::showGeneric(const QString &title,
     card.payload = payload;
     card.sound = sound;
     card.avatarMxc = avatarMxc;
+    card.notifyEvent = notifyEvent;
     deliver(std::move(card));
 }
 
@@ -1423,6 +1492,10 @@ void NotificationManager::recordEventCard(const QString &eventKey,
 
 bool NotificationManager::deliveryReplacesInPlace() const
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKNotificationBackend())
+        return true;
+#endif
 #ifdef HAVE_QT_DBUS
     return QDBusConnection::sessionBus().isConnected();
 #else
@@ -1968,15 +2041,24 @@ void NotificationManager::tombstone(quint32 id, const QString &accountUserId)
 
 void NotificationManager::closeNotification(quint32 id)
 {
+    if (id == 0)
+        return;
+#ifdef KAMINARI_ENABLE_KDE
+    if (QPointer<KNotification> notification = m_kdeNotifications.take(id)) {
+        notification->disconnect(this);
+        notification->close();
+        return;
+    }
+    if ((id & kKdeSyntheticIdMask) != 0)
+        return;
+#endif
 #ifdef HAVE_QT_DBUS
     QDBusConnection bus = QDBusConnection::sessionBus();
-    if (id == 0 || !bus.isConnected())
+    if (!bus.isConnected())
         return;
     QDBusMessage call = notificationsCall(QStringLiteral("CloseNotification"));
     call << id;
     bus.send(call);
-#else
-    Q_UNUSED(id);
 #endif
 }
 
@@ -2263,6 +2345,19 @@ bool NotificationManager::replacementStillOwned(const Card &card) const
             == card.payload.value(QStringLiteral("eventId")).toString();
 }
 
+QString NotificationManager::backendName() const
+{
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKNotificationBackend())
+        return QStringLiteral("knotification");
+#endif
+#ifdef HAVE_QT_DBUS
+    if (QDBusConnection::sessionBus().isConnected())
+        return QStringLiteral("freedesktop");
+#endif
+    return QStringLiteral("tray");
+}
+
 void NotificationManager::deliverNow(Card card)
 {
     noteCardFor(card.accountKey);
@@ -2276,6 +2371,12 @@ void NotificationManager::deliverNow(Card card)
         card.payload.value(QStringLiteral("roomId")).toString();
     const bool isMessage =
         !card.payload.value(QStringLiteral("eventId")).toString().isEmpty();
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKNotificationBackend()) {
+        deliverViaKNotification(std::move(card));
+        return;
+    }
+#endif
     const auto throughTray = [this, mention, roomId, isMessage](const Card &c) {
         if (c.replacement)
             return;
@@ -2361,7 +2462,7 @@ mention || roomId.isEmpty()))
     const QString safeBody = bodyForServer(card.body);
 
     QDBusMessage call = notificationsCall(QStringLiteral("Notify"));
-    call << QStringLiteral("Lightning") << replacesId << identity.appIcon
+    call << brandDisplayName() << replacesId << identity.appIcon
          << card.title << safeBody << shape.actions << hints << int(-1);
     auto *watcher = new QDBusPendingCallWatcher(
         bus.asyncCall(call, kNotifyTimeoutMs), this);
@@ -2695,7 +2796,7 @@ void NotificationManager::showPendingBalloons()
     if (rooms.size() == 1) {
         summary = m_balloonQueue.last();
     } else {
-        summary.title = QStringLiteral("Lightning");
+        summary.title = brandDisplayName();
         summary.body =
             QCoreApplication::translate("Notifications", "%n new messages",
                                         nullptr, messages)
@@ -2807,11 +2908,23 @@ void NotificationManager::emitOpenFor(const QVariantMap &payload)
 
 void NotificationManager::onActivationToken(quint32 id, const QString &token)
 {
+    if ((id & kKdeSyntheticIdMask) != 0)
+        return;
+    handleActivationToken(id, token);
+}
+
+void NotificationManager::handleActivationToken(quint32 id,
+                                                const QString &token)
+{
     // Only for our cards; the signal can reach every listener on the bus.
     if (id == 0 || token.isEmpty())
         return;
     if (!tableHolding(id) && !m_tombstones.contains(id)
-        && id != m_activeCallNotificationId)
+        && id != m_activeCallNotificationId
+#ifdef KAMINARI_ENABLE_KDE
+        && !m_kdeNotifications.contains(id)
+#endif
+    )
         return;
     m_activationTokens.insert(id, token);
     while (m_activationTokens.size() > kMaxActivationTokens)
@@ -2824,6 +2937,9 @@ void NotificationManager::applyActivationToken(quint32 id)
     m_lastClickHadToken = !token.isEmpty();
     if (token.isEmpty())
         return;
+#ifdef KAMINARI_ENABLE_KDE
+    KWindowSystem::setCurrentXdgActivationToken(token);
+#endif
     // As for a second launch (main.cpp): Qt's Wayland shell integration reads
     // and clears the variable when the window next activates.
     if (m_assumeWayland
@@ -2832,6 +2948,14 @@ void NotificationManager::applyActivationToken(quint32 id)
 }
 
 void NotificationManager::onActionInvoked(quint32 id, const QString &action)
+{
+    if ((id & kKdeSyntheticIdMask) != 0)
+        return;
+    handleActionInvoked(id, action);
+}
+
+void NotificationManager::handleActionInvoked(quint32 id,
+                                              const QString &action)
 {
     if (action == QLatin1String("accept")) {
         if (id != 0 && id == m_activeCallNotificationId
@@ -2891,6 +3015,14 @@ void NotificationManager::onActionInvoked(quint32 id, const QString &action)
 
 void NotificationManager::onNotificationReplied(quint32 id, const QString &text)
 {
+    if ((id & kKdeSyntheticIdMask) != 0)
+        return;
+    handleNotificationReplied(id, text);
+}
+
+void NotificationManager::handleNotificationReplied(quint32 id,
+                                                    const QString &text)
+{
     const QVariantMap payload = payloadFor(id);
     if (payload.isEmpty()) {
         handleStaleAction(id, QStringLiteral("inline-reply-text"), text);
@@ -2943,12 +3075,19 @@ void NotificationManager::handleStaleAction(quint32 id, const QString &action,
 
 void NotificationManager::showStaleActionNotice()
 {
-    showGeneric(tr("Lightning"),
-                tr("That notification is out of date, so nothing was sent. "
-                   "Open Lightning and try again from there."));
+    showGeneric(brandText(tr("Lightning")),
+                brandText(tr("That notification is out of date, so nothing was sent. "
+                             "Open Lightning and try again from there.")));
 }
 
 void NotificationManager::onNotificationClosed(quint32 id, quint32 reason)
+{
+    if ((id & kKdeSyntheticIdMask) != 0)
+        return;
+    handleNotificationClosed(id, reason);
+}
+
+void NotificationManager::handleNotificationClosed(quint32 id, quint32 reason)
 {
     if (id != 0 && id == m_activeCallNotificationId) {
         if (reason == kClosedExpired) {
@@ -2998,6 +3137,9 @@ void NotificationManager::onDaemonOwnerChanged(const QString &service,
     qCInfo(lcNotify) << "notification service changed hands; running:"
                      << !newOwner.isEmpty();
     ++m_daemonGeneration;
+#ifdef KAMINARI_ENABLE_KDE
+    clearKdeNotifications();
+#endif
     for (auto it = m_tables.begin(); it != m_tables.end(); ++it) {
         it->pendingPayloads.clear();
         it->payloadOrder.clear();
@@ -3129,10 +3271,305 @@ void NotificationManager::stopIncomingCall(const QString &callId)
     m_activeCallSound = false;
 }
 
+#ifdef KAMINARI_ENABLE_KDE
+bool NotificationManager::useKNotificationBackend() const
+{
+    if (qEnvironmentVariableIsSet("KAMINARI_DISABLE_KNOTIFICATION"))
+        return false;
+    if (qEnvironmentVariableIsSet("KAMINARI_FORCE_KNOTIFICATION"))
+        return true;
+    const QString platform = QGuiApplication::platformName();
+    if (platform.startsWith(QLatin1String("offscreen"))
+        || platform.startsWith(QLatin1String("minimal"))) {
+        return false;
+    }
+#ifdef HAVE_QT_DBUS
+    if (!QDBusConnection::sessionBus().isConnected())
+        return false;
+#else
+    return false;
+#endif
+    const QString rel = QStringLiteral("knotifications6/%1.notifyrc")
+                            .arg(notifyComponentName());
+    return !QStandardPaths::locate(QStandardPaths::GenericDataLocation, rel)
+                .isEmpty();
+}
+
+quint32 NotificationManager::nextKdeId()
+{
+    quint32 seq = (m_nextKdeId++) & 0x7FFFFFFFu;
+    if (seq == 0)
+        seq = (m_nextKdeId++) & 0x7FFFFFFFu;
+    return kKdeSyntheticIdMask | seq;
+}
+
+void NotificationManager::clearKdeNotifications()
+{
+    const auto items = std::exchange(m_kdeNotifications, {});
+    for (const QPointer<KNotification> &notification : items) {
+        if (notification) {
+            notification->disconnect(this);
+            notification->close();
+        }
+    }
+}
+
+QString NotificationManager::kdeEventIdForCard(const Card &card)
+{
+    if (card.notifyEvent == QLatin1String("verification_request"))
+        return QStringLiteral("verification_request");
+    if (card.notifyEvent == QLatin1String("test"))
+        return QStringLiteral("test");
+    if (card.payload.value(QStringLiteral("mention")).toBool())
+        return QStringLiteral("mention");
+    if (card.direct)
+        return QStringLiteral("direct_message");
+    return QStringLiteral("message");
+}
+
+void NotificationManager::deliverViaKNotification(Card card)
+{
+    const bool mention = card.payload.value(QStringLiteral("mention")).toBool();
+    const QString roomId =
+        card.payload.value(QStringLiteral("roomId")).toString();
+    const bool isMessage =
+        !card.payload.value(QStringLiteral("eventId")).toString().isEmpty();
+    constexpr qint64 kKdeInhibitionRefreshMs = 30000;
+    if (!m_inhibitionQueried
+        || nowMs() - m_inhibitionQueriedAtMs > kKdeInhibitionRefreshMs) {
+        m_inhibitionQueried = true;
+        m_inhibitionQueriedAtMs = nowMs();
+        queryDesktopInhibition();
+    }
+    const QString groupKey =
+        card.payload.value(QStringLiteral("group")).toString();
+    quint32 previousId = 0;
+    if (!groupKey.isEmpty()) {
+        CardGroup &group = table(card.accountKey).groups[groupKey];
+        previousId = group.id;
+        group.inFlight = true;
+        group.withdrawn = false;
+        group.payload = card.payload;
+    }
+    if (previousId != 0) {
+        if (QPointer<KNotification> prev = m_kdeNotifications.take(previousId)) {
+            prev->disconnect(this);
+            prev->close();
+        }
+    }
+
+    const quint32 id = nextKdeId();
+    auto *notification = new KNotification(
+        kdeEventIdForCard(card), KNotification::CloseWhenWindowActivated, this);
+    notification->setComponentName(notifyComponentName());
+    notification->setTitle(card.title);
+    notification->setText(card.body.toHtmlEscaped());
+    if (m_window)
+        notification->setWindow(m_window);
+    notification->setUrgency(KNotification::NormalUrgency);
+    if (!card.avatar.isNull()) {
+        const int edge = qMin(card.avatar.width(), card.avatar.height());
+        const QRect crop((card.avatar.width() - edge) / 2,
+                         (card.avatar.height() - edge) / 2, edge, edge);
+        const QImage cropped = card.avatar.copy(crop).scaled(
+            64, 64, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        notification->setPixmap(QPixmap::fromImage(cropped));
+    } else {
+        notification->setIconName(kdeAppIconName());
+    }
+    const DesktopIdentity identity = desktopIdentityFor(
+        qEnvironmentVariable("FLATPAK_ID"),
+        qEnvironmentVariable("SNAP"),
+        qEnvironmentVariable("SNAP_NAME"));
+    notification->setHint(QStringLiteral("desktop-entry"),
+                          identity.desktopEntry);
+    const SoundPlan plan =
+        takeSoundPlan(card.sound && !card.replacement, mention, true);
+    const QVariantMap soundHintMap = soundHints(plan);
+    for (auto it = soundHintMap.cbegin(); it != soundHintMap.cend(); ++it)
+        notification->setHint(it.key(), it.value());
+
+    auto *openAction = notification->addDefaultAction(tr("Open"));
+    connect(openAction, &KNotificationAction::activated, this,
+            [this, id, n = QPointer<KNotification>(notification)] {
+        if (n) {
+            n->disconnect(this);
+            const QString token = n->xdgActivationToken();
+            if (!token.isEmpty())
+                handleActivationToken(id, token);
+        }
+        m_kdeNotifications.remove(id);
+        handleActionInvoked(id, QStringLiteral("default"));
+        if (n)
+            n->close();
+    });
+    if (card.notifyEvent.isEmpty() && !roomId.isEmpty() && isMessage) {
+        auto *markRead = notification->addAction(tr("Mark as read"));
+        connect(markRead, &KNotificationAction::activated, this,
+                [this, id, n = QPointer<KNotification>(notification)] {
+            if (n)
+                n->disconnect(this);
+            m_kdeNotifications.remove(id);
+            handleActionInvoked(id, QStringLiteral("mark-read"));
+            if (n)
+                n->close();
+        });
+        auto replyAction =
+            std::make_unique<KNotificationReplyAction>(tr("Reply"));
+        replyAction->setPlaceholderText(tr("Reply…"));
+        connect(replyAction.get(), &KNotificationReplyAction::replied, this,
+                [this, id, n = QPointer<KNotification>(notification)](
+                    const QString &text) {
+            if (n)
+                n->disconnect(this);
+            m_kdeNotifications.remove(id);
+            handleNotificationReplied(id, text);
+            if (n)
+                n->close();
+        });
+        notification->setReplyAction(std::move(replyAction));
+    }
+    connect(notification, &KNotification::closed, this, [this, id] {
+        if (m_kdeNotifications.remove(id) == 0)
+            return;
+        handleNotificationClosed(id, kClosedDismissed);
+    });
+
+    m_kdeNotifications.insert(id, notification);
+    if (isMessage && !card.replacement)
+        Q_EMIT messageDelivered(roomId, mention);
+    takeNotifyReply(card, groupKey,
+                    table(card.accountKey).deliveryGeneration, id);
+    if (m_kdeNotifications.contains(id) && notification)
+        notification->sendEvent();
+}
+
+void NotificationManager::deliverCallViaKNotification()
+{
+    if (m_activeCallId.isEmpty())
+        return;
+    constexpr qint64 kKdeInhibitionRefreshMs = 30000;
+    if (!m_inhibitionQueried
+        || nowMs() - m_inhibitionQueriedAtMs > kKdeInhibitionRefreshMs) {
+        m_inhibitionQueried = true;
+        m_inhibitionQueriedAtMs = nowMs();
+        queryDesktopInhibition();
+    }
+    const quint32 previousId = m_activeCallNotificationId;
+    if (previousId != 0) {
+        if (QPointer<KNotification> prev = m_kdeNotifications.take(previousId)) {
+            prev->disconnect(this);
+            prev->close();
+        }
+        forgetPayload(previousId);
+    }
+
+    const quint32 id = nextKdeId();
+    auto *notification = new KNotification(
+        QStringLiteral("incoming_call"), KNotification::Persistent, this);
+    notification->setComponentName(notifyComponentName());
+    notification->setTitle(m_activeCallTitle);
+    notification->setText(m_activeCallBody.toHtmlEscaped());
+    notification->setIconName(kdeAppIconName());
+    if (m_window)
+        notification->setWindow(m_window);
+    notification->setUrgency(KNotification::CriticalUrgency);
+    const DesktopIdentity identity = desktopIdentityFor(
+        qEnvironmentVariable("FLATPAK_ID"),
+        qEnvironmentVariable("SNAP"),
+        qEnvironmentVariable("SNAP_NAME"));
+    notification->setHint(QStringLiteral("desktop-entry"),
+                          identity.desktopEntry);
+    notification->setHint(QStringLiteral("resident"), true);
+    const QVariantMap soundHintMap = callSoundHints(m_activeCallSound);
+    for (auto it = soundHintMap.cbegin(); it != soundHintMap.cend(); ++it)
+        notification->setHint(it.key(), it.value());
+
+    auto *openAction = notification->addDefaultAction(tr("Open"));
+    connect(openAction, &KNotificationAction::activated, this,
+            [this, id, n = QPointer<KNotification>(notification)] {
+        if (n) {
+            n->disconnect(this);
+            const QString token = n->xdgActivationToken();
+            if (!token.isEmpty())
+                handleActivationToken(id, token);
+        }
+        m_kdeNotifications.remove(id);
+        handleActionInvoked(id, QStringLiteral("default"));
+        if (n)
+            n->close();
+    });
+    if (m_activeCallAcceptOffered) {
+        auto *acceptAction = notification->addAction(
+            m_activeCallRtcLane ? tr("Join") : tr("Answer"));
+        connect(acceptAction, &KNotificationAction::activated, this,
+                [this, id, n = QPointer<KNotification>(notification)] {
+            if (n) {
+                n->disconnect(this);
+                const QString token = n->xdgActivationToken();
+                if (!token.isEmpty())
+                    handleActivationToken(id, token);
+            }
+            m_kdeNotifications.remove(id);
+            handleActionInvoked(id, QStringLiteral("accept"));
+            if (n)
+                n->close();
+        });
+    }
+    if (m_activeCallSilenceOffered) {
+        auto *silenceAction = notification->addAction(tr("Silence"));
+        connect(silenceAction, &KNotificationAction::activated, this,
+                [this, id, n = QPointer<KNotification>(notification)] {
+            if (n)
+                n->disconnect(this);
+            m_kdeNotifications.remove(id);
+            handleActionInvoked(id, QStringLiteral("silence"));
+            if (n)
+                n->close();
+        });
+    }
+    auto *declineAction = notification->addAction(tr("Decline"));
+    connect(declineAction, &KNotificationAction::activated, this,
+            [this, id, n = QPointer<KNotification>(notification)] {
+        if (n)
+            n->disconnect(this);
+        m_kdeNotifications.remove(id);
+        handleActionInvoked(id, QStringLiteral("decline"));
+        if (n)
+            n->close();
+    });
+    connect(notification, &KNotification::closed, this, [this, id] {
+        if (m_kdeNotifications.remove(id) == 0)
+            return;
+        handleNotificationClosed(id, kClosedDismissed);
+    });
+
+    m_kdeNotifications.insert(id, notification);
+    m_activeCallNotificationId = id;
+    m_activeCallCardExpired = false;
+    m_callNotifyInFlight = false;
+    m_callRedrawPending = false;
+    recordPayload(QString(), id,
+                  QVariantMap{
+                      { QStringLiteral("roomId"), m_activeCallRoomId },
+                      { QStringLiteral("eventId"), QString() },
+                      { QStringLiteral("threadRootId"), QString() },
+                      { QStringLiteral("accountUserId"), m_accountUserId },
+                  });
+    notification->sendEvent();
+}
+#endif
+
 void NotificationManager::deliverCallNotification()
 {
     if (m_activeCallId.isEmpty())
         return;
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKNotificationBackend()) {
+        deliverCallViaKNotification();
+        return;
+    }
+#endif
 #ifdef HAVE_QT_DBUS
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) {
@@ -3160,7 +3597,7 @@ void NotificationManager::deliverCallNotification()
     for (auto it = soundHintMap.cbegin(); it != soundHintMap.cend(); ++it)
         hints.insert(it.key(), it.value());
     QDBusMessage call = notificationsCall(QStringLiteral("Notify"));
-    call << QStringLiteral("Lightning") << m_activeCallNotificationId
+    call << brandDisplayName() << m_activeCallNotificationId
          << identity.appIcon << m_activeCallTitle
          << bodyForServer(m_activeCallBody) << actions << hints << int(-1);
     m_callNotifyInFlight = true;

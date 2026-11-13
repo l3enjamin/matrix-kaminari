@@ -96,7 +96,11 @@
 #include <QImage>
 #endif
 #include <QQmlContext>
+#include <QQmlFileSelector>
 #include <QQuickStyle>
+#ifdef KAMINARI_ENABLE_KDE
+#include <KAboutData>
+#endif
 #include <QProcess>
 #include <QSaveFile>
 #include <QSettings>
@@ -133,6 +137,51 @@ namespace {
 
 using lightning::backendFromName;
 using lightning::backendNameFor;
+
+constexpr const char *brandOrgName()
+{
+#ifdef KAMINARI_BRANDING
+    return "Kaminari";
+#else
+    return "MatrixClient";
+#endif
+}
+
+constexpr const char *brandOrgDomain()
+{
+#ifdef KAMINARI_BRANDING
+    return "kaminari-matrix.org";
+#else
+    return "matrix-client.local";
+#endif
+}
+
+constexpr const char *brandAppName()
+{
+#ifdef KAMINARI_BRANDING
+    return "kaminari";
+#else
+    return "matrix-client";
+#endif
+}
+
+constexpr const char *brandDisplayName()
+{
+#ifdef KAMINARI_BRANDING
+    return "Kaminari";
+#else
+    return "Lightning";
+#endif
+}
+
+constexpr const char *brandExeName()
+{
+#ifdef KAMINARI_BRANDING
+    return "kaminari";
+#else
+    return "lightning-matrix";
+#endif
+}
 
 #ifdef Q_OS_WIN
 bool standardHandleAlreadyGoesSomewhere(DWORD which)
@@ -420,6 +469,20 @@ QString buildInfoString()
 #endif
     out += QStringLiteral("secret_store: %1\n").arg(secretStore);
     out += QStringLiteral("artifact_kind: %1\n").arg(QLatin1String(LIGHTNING_ARTIFACT_KIND));
+    out += QStringLiteral("kde_integration_compiled: %1\n").arg(yn(
+#ifdef KAMINARI_ENABLE_KDE
+        true
+#else
+        false
+#endif
+    ));
+    out += QStringLiteral("kaminari_branding: %1\n").arg(yn(
+#ifdef KAMINARI_BRANDING
+        true
+#else
+        false
+#endif
+    ));
     return out;
 }
 
@@ -505,9 +568,9 @@ PreflightResult preflightParse(int argc, char *argv[])
         if (a == QLatin1String("-h") || a == QLatin1String("--help")) {
             r.action = PreflightResult::ExitSuccess;
             r.stdoutMsg = QStringLiteral(
-                "Lightning — native Qt/QML Matrix desktop client (lightning-matrix).\n"
+                "%1 — native Qt/QML Matrix desktop client (%2).\n"
                 "\n"
-                "Usage: lightning-matrix [options]\n"
+                "Usage: %2 [options]\n"
                 "\n"
                 "Options:\n"
                 "  -h, --help           Show this help and exit.\n"
@@ -534,11 +597,11 @@ PreflightResult preflightParse(int argc, char *argv[])
                 "                         rust  — Matrix Rust SDK backend (E2EE);\n"
                 "                                 requires -DENABLE_RUST_SDK_BACKEND=ON\n"
                 "                                 at build time)\n"
-                "                       Default for this build: %1.\n"
+                "                       Default for this build: %3.\n"
                 "  --reset-crypto-store Delete per-account Rust SDK stores under\n"
-                "                       ${XDG_DATA_HOME}/MatrixClient/matrix-client/*/matrix-rust-sdk-store.\n"
+                "                       ${XDG_DATA_HOME}/%4/%5/*/matrix-rust-sdk-store.\n"
                 "                       It never touches cache.sqlite or SecretStore tokens.\n"
-                "                       Refuses, with exit code 6, while a running Lightning\n"
+                "                       Refuses, with exit code 6, while a running %1\n"
                 "                       instance still owns this profile's data root.\n"
                 "                       Exit code 0 when nothing is found; exit code 3 on error.\n"
                 "  --rust-sdk-smoke-test\n"
@@ -576,7 +639,7 @@ PreflightResult preflightParse(int argc, char *argv[])
                 "                       exit. For hearing the set; takes ~30 seconds.\n"
                 "  --image-format-status\n"
                 "                       Print which image formats this build can decode\n"
-                "                       and whether that covers what Lightning accepts,\n"
+                "                       and whether that covers what %1 accepts,\n"
                 "                       then exit. Exit 0 only when every required\n"
                 "                       format has a decoder. Qt image formats are\n"
                 "                       dlopen'd plugins, so this is a property of the\n"
@@ -609,12 +672,17 @@ PreflightResult preflightParse(int argc, char *argv[])
                 "                       every provider is configured and responds.\n"
                 "\n"
                 "See docs/build-and-test.md and docs/backend-contract.md for details.\n")
-                .arg(backendNameFor(lightning::defaultBackend()));
+                .arg(QLatin1String(brandDisplayName()),
+                     QLatin1String(brandExeName()),
+                     backendNameFor(lightning::defaultBackend()),
+                     QLatin1String(brandOrgName()),
+                     QLatin1String(brandAppName()));
             return r;
         }
         if (a == QLatin1String("-v") || a == QLatin1String("--version")) {
             r.action = PreflightResult::ExitSuccess;
-            r.stdoutMsg = QStringLiteral("Lightning %1\n").arg(QLatin1String(APP_VERSION));
+            r.stdoutMsg = QStringLiteral("%1 %2\n").arg(
+                QLatin1String(brandDisplayName()), QLatin1String(APP_VERSION));
 #ifdef LIGHTNING_TEST_LOOPBACK_FOCI
             r.stdoutMsg += QStringLiteral("WARNING: TEST BUILD permits loopback MatrixRTC foci\n");
 #endif
@@ -789,8 +857,8 @@ PreflightResult preflightParse(int argc, char *argv[])
             const QStringList roots = matrix::app_data::allRoots();
 
             r.stdoutMsg = QStringLiteral(
-                "lightning-matrix --reset-crypto-store\n"
-                "\n");
+                "%1 --reset-crypto-store\n"
+                "\n").arg(QLatin1String(brandExeName()));
             if (roots.isEmpty()) {
                 r.stdoutMsg += QStringLiteral(
                     "No app data root available "
@@ -799,15 +867,15 @@ PreflightResult preflightParse(int argc, char *argv[])
             }
 
             lightning::SingleInstanceGuard::RootLock rootLock(
-                roots.first(), QStringLiteral("matrix-client"));
+                roots.first(), QString::fromLatin1(brandAppName()));
             if (rootLock.result()
                 == lightning::SingleInstanceGuard::LockProbe::HeldByOther) {
                 r.action = PreflightResult::ExitResetRefused;
                 r.stderrMsg = QStringLiteral(
-                    "Lightning is already running with this profile "
-                    "(%1). Quit it first: deleting its Rust SDK store while "
+                    "%1 is already running with this profile "
+                    "(%2). Quit it first: deleting its Rust SDK store while "
                     "it is open can corrupt Olm sessions and one-time "
-                    "keys.\n").arg(roots.first());
+                    "keys.\n").arg(QLatin1String(brandDisplayName()), roots.first());
                 return r;
             }
 
@@ -1017,8 +1085,13 @@ void installRepeatLimiter()
 
 namespace {
 
+#ifdef KAMINARI_BRANDING
+constexpr QLatin1String kAppId("kaminari");
+constexpr QLatin1String kWmClass("kaminari");
+#else
 constexpr QLatin1String kAppId("lightning");
 constexpr QLatin1String kWmClass("matrix-client");
+#endif
 
 QString resolvedAppId()
 {
@@ -1081,7 +1154,11 @@ QStringList launcherEntrySource(const QString &payloadEntry)
     return QStringList{
         QStringLiteral("[Desktop Entry]"),
         QStringLiteral("Type=Application"),
+#ifdef KAMINARI_BRANDING
+        QStringLiteral("Name=Kaminari"),
+#else
         QStringLiteral("Name=Lightning"),
+#endif
         QStringLiteral("GenericName=Matrix Client"),
         QStringLiteral("Comment=Native Qt Matrix chat client"),
         QStringLiteral("Terminal=false"),
@@ -1537,6 +1614,26 @@ static int printDesktopStatus()
     out << "visible icon: "
         << (visibleIcon.isEmpty() ? QStringLiteral("NONE") : visibleIcon)
         << "\n";
+#ifdef KAMINARI_ENABLE_KDE
+    QString visibleNotifyRc;
+    const QString notifyRcName =
+        QLatin1String(brandAppName()) + QStringLiteral(".notifyrc");
+    for (const QString &dir : dirs) {
+        const QString candidate =
+            dir + QStringLiteral("/knotifications6/") + notifyRcName;
+        if (QFileInfo(candidate).isFile()) {
+            visibleNotifyRc = candidate;
+            break;
+        }
+    }
+    out << "kde integration compiled: yes\n";
+    out << "visible notifyrc: "
+        << (visibleNotifyRc.isEmpty() ? QStringLiteral("NONE")
+                                      : visibleNotifyRc)
+        << "\n";
+#else
+    out << "kde integration compiled: no\n";
+#endif
 
     if (visibleEntry.isEmpty() || visibleIcon.isEmpty()) {
         out << "\nRESULT: this session cannot resolve the app id \"" << appId
@@ -1859,8 +1956,8 @@ int main(int argc, char *argv[])
         return 6;
     }
     if (pf.action == PreflightResult::RunCallMediaStatus) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
 #ifdef HAVE_LIGHTNING_WEBRTC
         QCoreApplication probeApp(argc, argv);
         return printCallMediaStatus();
@@ -1873,8 +1970,8 @@ int main(int argc, char *argv[])
 #endif
     }
     if (pf.action == PreflightResult::RunCallQueueSelfTest) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
 #ifdef HAVE_LIGHTNING_WEBRTC
         QCoreApplication probeApp(argc, argv);
         DiagnosticStream out(stdout);
@@ -1901,8 +1998,8 @@ int main(int argc, char *argv[])
     }
     if (pf.action == PreflightResult::RunCallSoundsStatus
         || pf.action == PreflightResult::RunCallSoundsDemo) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication probeApp(argc, argv);
         DiagnosticStream out(stdout);
         const QAudioDevice output = QMediaDevices::defaultAudioOutput();
@@ -1981,14 +2078,14 @@ int main(int argc, char *argv[])
                                pf.svgMaxEdge, pf.svgNoText);
     }
     if (pf.action == PreflightResult::RunImageFormatStatus) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication probeApp(argc, argv);
         return printImageFormatStatus();
     }
     if (pf.action == PreflightResult::RunSpellStatus) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication spellProbeApp(argc, argv);
         SpellChecker checker;
         checker.initialize();
@@ -2054,8 +2151,8 @@ int main(int argc, char *argv[])
         return 0;
     }
     if (pf.action == PreflightResult::RunSpellSelfTest) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication spellProbeApp(argc, argv);
         DiagnosticStream out(stdout);
         auto yn = [](bool v) { return v ? "yes" : "no"; };
@@ -2121,8 +2218,8 @@ int main(int argc, char *argv[])
         return pass ? 0 : 1;
     }
     if (pf.action == PreflightResult::RunDesktopStatus) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication desktopProbeApp(argc, argv);
         return printDesktopStatus();
     }
@@ -2130,8 +2227,8 @@ int main(int argc, char *argv[])
         return gif::printProviderStatus();
     }
     if (pf.action == PreflightResult::RunGifSelfTest) {
-        QCoreApplication::setOrganizationName(QStringLiteral("MatrixClient"));
-        QCoreApplication::setApplicationName(QStringLiteral("matrix-client"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setApplicationName(QLatin1String(brandAppName()));
         QCoreApplication selftestApp(argc, argv);
         return gif::runProviderSelfTest();
     }
@@ -2148,17 +2245,15 @@ int main(int argc, char *argv[])
             if (created)
                 QFile::setPermissions(root, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
             profileLock = std::make_unique<lightning::SingleInstanceGuard::RootLock>(
-                root, QStringLiteral("matrix-client"));
+                root, QString::fromLatin1(brandAppName()));
             if (profileLock->result() != lightning::SingleInstanceGuard::LockProbe::Acquired) {
                 DiagnosticStream(stderr) << "persistent smoke test: profile lock unavailable or held by another process\n";
                 return 5;
             }
             profileLock->holdLockUntilProcessExit();
         }
-        QCoreApplication::setOrganizationName(
-            QStringLiteral("MatrixClient"));
-        QCoreApplication::setOrganizationDomain(
-            QStringLiteral("matrix-client.local"));
+        QCoreApplication::setOrganizationName(QLatin1String(brandOrgName()));
+        QCoreApplication::setOrganizationDomain(QLatin1String(brandOrgDomain()));
         return runRustSdkSmokeTest(argc, argv);
     }
 #endif
@@ -2175,7 +2270,7 @@ int main(int argc, char *argv[])
         if (lightning::startup::shouldRejectForNoDisplay(
                 kPlatformRequiresDisplayServer, hasDisplay, platformForced)) {
             QTextStream(stderr) <<
-                "lightning-matrix: no graphical display available "
+                brandExeName() << ": no graphical display available "
                 "(DISPLAY / WAYLAND_DISPLAY unset).\n"
                 "Run this app inside a graphical session, or export "
                 "QT_QPA_PLATFORM=offscreen for a headless smoke test.\n"
@@ -2184,15 +2279,22 @@ int main(int argc, char *argv[])
         }
     }
 
+#ifndef KAMINARI_BRANDING
     QCoreApplication::setOrganizationName("MatrixClient");
     QCoreApplication::setOrganizationDomain("matrix-client.local");
     QCoreApplication::setApplicationName("matrix-client");
+#else
+    QCoreApplication::setOrganizationName("Kaminari");
+    QCoreApplication::setOrganizationDomain("kaminari-matrix.org");
+    QCoreApplication::setApplicationName("kaminari");
+#endif
     QCoreApplication::setApplicationVersion(APP_VERSION);
 
 #ifdef LIGHTNING_ENABLE_SCREENSHOT_DEMO
     if (pf.screenshotDemo)
         QCoreApplication::setApplicationName(
-            QStringLiteral("matrix-client-screenshot-demo"));
+            QString::fromLatin1(brandAppName())
+            + QStringLiteral("-screenshot-demo"));
 #endif
 
     // Portable mode. Must be decided before the first QSettings is
@@ -2203,9 +2305,10 @@ int main(int argc, char *argv[])
         const QString portableProblem = lightning::portable::prepareDataRoot();
         if (!portableProblem.isEmpty()) {
             const QString advice =
-                QStringLiteral("Lightning portable needs write access to its "
+                QStringLiteral("%1 portable needs write access to its "
                                "data directory. Move the extracted folder to "
-                               "a writable location and try again.");
+                               "a writable location and try again.")
+                    .arg(QLatin1String(brandDisplayName()));
             QTextStream(stderr) << portableProblem << "\n" << advice << "\n";
 #ifdef Q_OS_WIN
             const QString text = portableProblem + QStringLiteral("\n\n") + advice;
@@ -2227,6 +2330,27 @@ int main(int argc, char *argv[])
                       + QStringLiteral("/qmlcache"));
         qputenv("QT_DISABLE_SHADER_DISK_CACHE", "1");
     }
+
+#ifdef KAMINARI_BRANDING
+    // Migrate existing MatrixClient/matrix-client profile and settings to Kaminari
+    // before the first QSettings read, only when no legacy instance owns the lock.
+    if (!lightning::portable::isPortable()) {
+        const QString legacyRoot = matrix::app_data::legacyPrimaryRoot();
+        bool legacyBusy = false;
+        if (!legacyRoot.isEmpty() && QFileInfo::exists(legacyRoot)) {
+            lightning::SingleInstanceGuard::RootLock legacyLock(
+                legacyRoot, QStringLiteral("matrix-client"));
+            legacyBusy = legacyLock.result()
+                == lightning::SingleInstanceGuard::LockProbe::HeldByOther;
+        }
+        if (legacyBusy) {
+            qWarning("kaminari: legacy Lightning profile is open in another "
+                     "process; skipping automatic profile migration");
+        } else {
+            matrix::app_data::migrateLegacyAppDataIfNeeded();
+        }
+    }
+#endif
 
     {
         const int swept = lightning::portable::cleanStaleTempDirs();
@@ -2262,6 +2386,25 @@ int main(int argc, char *argv[])
     // watcher, QSystemTrayIcon on X11 falls back to the XEmbed tray, which is
     // a QWidget.
     QApplication app(argc, argv);
+#ifdef KAMINARI_ENABLE_KDE
+    {
+        KAboutData aboutData(
+            QCoreApplication::applicationName(),
+            QCoreApplication::translate("main", brandDisplayName()),
+            QStringLiteral(APP_VERSION),
+            QCoreApplication::translate("main", "Native KDE Plasma Matrix client"),
+            KAboutLicense::GPL_V3,
+            QCoreApplication::translate("main",
+                "Copyright 2025-2026 Lightning & Kaminari contributors"),
+            QString(),
+            QStringLiteral("https://www.lightning-matrix.org"),
+            QStringLiteral("https://github.com/Mizerd/lightning/issues"));
+        aboutData.setOrganizationDomain(
+            QCoreApplication::organizationDomain().toUtf8());
+        aboutData.setDesktopFileName(resolvedAppId());
+        KAboutData::setApplicationData(aboutData);
+    }
+#endif
     qCInfo(lcQtAudioBackend).noquote() << g_qtAudioBackendLine;
     lightning::svgraster::hooks().scratchRoot = [] {
         return lightning::portable::mediaScratchRoot();
@@ -2305,10 +2448,11 @@ int main(int argc, char *argv[])
         return 0;
     case lightning::SingleInstanceGuard::Claim::Unresponsive: {
         const QString text = QStringLiteral(
-            "Lightning is already running with this profile but did not "
-            "respond. If no window appears, quit the running Lightning (or end "
-            "it in the task manager) and start it again.");
-        QTextStream(stderr) << "lightning-matrix: " << text << "\n";
+            "%1 is already running with this profile but did not "
+            "respond. If no window appears, quit the running %1 (or end "
+            "it in the task manager) and start it again.")
+            .arg(QLatin1String(brandDisplayName()));
+        QTextStream(stderr) << brandExeName() << ": " << text << "\n";
 #ifdef Q_OS_WIN
         MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(text.utf16()),
                     L"Lightning", MB_OK | MB_ICONWARNING);
@@ -2385,9 +2529,11 @@ int main(int argc, char *argv[])
                      qUtf8Printable(missing.join(QStringLiteral(", "))));
     }
     QGuiApplication::setWindowIcon(QIcon::fromTheme(
-        QStringLiteral("lightning"),
-        QIcon(QStringLiteral(
-            ":/qt/qml/MatrixClient/data/icons/hicolor/256x256/apps/lightning.png"))));
+        QString(kAppId),
+        QIcon::fromTheme(
+            QStringLiteral("lightning"),
+            QIcon(QStringLiteral(
+                ":/qt/qml/MatrixClient/data/icons/hicolor/256x256/apps/lightning.png")))));
 
     for (const char *font : { "Manrope[wght].ttf", "JetBrainsMono[wght].ttf",
                               "Inter[wght].ttf", "IBMPlexSans[wght].ttf",
@@ -2460,7 +2606,14 @@ int main(int argc, char *argv[])
     parser.addOption(backendOpt);
     parser.process(app);
 
+#ifdef KAMINARI_ENABLE_KDE
+    if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_STYLE")) {
+        QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
+        QQuickStyle::setFallbackStyle(QStringLiteral("Basic"));
+    }
+#else
     QQuickStyle::setStyle("Basic");
+#endif
 
     AppController controller(pf.backend, pf.screenshotDemo);
     controller.enableCallMediaEngine();
@@ -2705,6 +2858,11 @@ int main(int argc, char *argv[])
                 },
                 Qt::SingleShotConnection);
         });
+
+#ifdef KAMINARI_ENABLE_KDE
+    QQmlFileSelector kdeFileSelector(&engine);
+    kdeFileSelector.setExtraSelectors({QStringLiteral("kde")});
+#endif
 
     engine.loadFromModule("MatrixClient", "Main");
 

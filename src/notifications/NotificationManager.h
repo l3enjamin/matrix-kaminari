@@ -18,13 +18,19 @@
 #include <memory>
 #include <optional>
 
+class QWindow;
 struct TimelineEvent;
 class TrayIcon;
+#ifdef KAMINARI_ENABLE_KDE
+class KNotification;
+#endif
 
 class NotificationManager : public QObject
 {
     Q_OBJECT
 public:
+    ~NotificationManager() override;
+    void setWindow(QWindow *window);
     bool lastClickHadActivationToken() { return std::exchange(m_lastClickHadToken, false); }
 
     enum PreviewMode { SenderAndMessage = 0, SenderOnly = 1, Private = 2 };
@@ -160,6 +166,7 @@ public:
     bool desktopInhibited() const
     { return m_daemonInhibited || m_bannersOff; }
     bool inlineReplySupported() const { return m_inlineReply; }
+    QString backendName() const;
 
     static Decision decide(const TimelineEvent &event, const Context &context);
     static QString senderLabel(const TimelineEvent &event,
@@ -195,7 +202,8 @@ public:
                      const QString &roomId = QString(),
                      const QString &avatarMxc = QString(),
                      bool sound = false, const QString &key = QString(),
-                     const QString &accountUserId = QString());
+                     const QString &accountUserId = QString(),
+                     const QString &notifyEvent = QString());
     void withdrawGeneric(const QString &key);
 
     void showIncomingCall(const QString &roomId, const QString &callId,
@@ -368,7 +376,21 @@ private:
         QImage fallback;
         bool replacement = false;
         QString accountKey;
+        bool direct = false;
+        QString notifyEvent;
     };
+    void handleActionInvoked(quint32 id, const QString &action);
+    void handleNotificationReplied(quint32 id, const QString &text);
+    void handleNotificationClosed(quint32 id, quint32 reason);
+    void handleActivationToken(quint32 id, const QString &token);
+#ifdef KAMINARI_ENABLE_KDE
+    bool useKNotificationBackend() const;
+    void deliverViaKNotification(Card card);
+    void deliverCallViaKNotification();
+    void clearKdeNotifications();
+    quint32 nextKdeId();
+    static QString kdeEventIdForCard(const Card &card);
+#endif
     void deliver(Card card);
     bool replacementStillOwned(const Card &card) const;
     void deliverNow(Card card);
@@ -630,4 +652,9 @@ private:
         if (m_liveAccountsMode && !accountKey.isEmpty())
             ++m_cardGeneration[accountKey];
     }
+    QPointer<QWindow> m_window;
+#ifdef KAMINARI_ENABLE_KDE
+    quint32 m_nextKdeId = 1;
+    QHash<quint32, QPointer<KNotification>> m_kdeNotifications;
+#endif
 };

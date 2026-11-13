@@ -99,7 +99,11 @@ QString AboutController::versionSummary() const
     const QString kind = !m_packageKind.isEmpty()
         ? m_packageKind
         : QStringLiteral(LIGHTNING_ARTIFACT_KIND);
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("Kaminari %1\n%2: %3\n%4: %5\n%6: %7")
+#else
     return QStringLiteral("Lightning %1\n%2: %3\n%4: %5\n%6: %7")
+#endif
         .arg(QStringLiteral(APP_VERSION), tr("Commit"), shortCommit(),
              tr("Platform"), platform, tr("Package"), kind);
 }

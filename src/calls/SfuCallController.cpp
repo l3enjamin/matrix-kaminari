@@ -4494,15 +4494,17 @@ void SfuCallController::startCameraCapture()
     const bool deviceNode = cameraDeviceNodeVisible();
     const bool portalWired = !m_cameraPortal.isNull();
     const bool portalUsable = cameraPortalUsable();
+    const bool preferPortal = m_settings && m_settings->preferCameraPortal();
+    const bool chooseDirect = !preferPortal && cameraChosen();
     LinuxCameraRoute route =
-        linuxCameraRoute(sandboxed, portalUsable, deviceNode, cameraChosen());
+        linuxCameraRoute(sandboxed, portalUsable, deviceNode, chooseDirect);
     if (route == LinuxCameraRoute::Portal && m_cameraFellBack && deviceNode) {
         qCInfo(lcSfuCall) << "camera portal gave no picture earlier in this "
                              "call; using the device node";
         route = LinuxCameraRoute::Direct;
     }
     if (route == LinuxCameraRoute::Direct && m_cameraFellBackToPortal
-        && portalWired && !cameraChosen()) {
+        && portalWired && !chooseDirect) {
         qCInfo(lcSfuCall) << "camera device node was busy earlier in this "
                              "call; using the portal";
         route = LinuxCameraRoute::Portal;

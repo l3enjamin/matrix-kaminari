@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QPixmap>
+#include <QPointer>
 #include <QString>
 
 #include <memory>
@@ -11,6 +12,10 @@ class QEvent;
 class QImage;
 class QMenu;
 class QSystemTrayIcon;
+class QWindow;
+#ifdef KAMINARI_ENABLE_KDE
+class KStatusNotifierItem;
+#endif
 
 class TrayIcon : public QObject
 {
@@ -23,7 +28,17 @@ public:
     static bool platformSupportsTray();
 
     void setEnabled(bool enabled);
-    bool enabled() const { return m_icon != nullptr; }
+    bool enabled() const
+    {
+#ifdef KAMINARI_ENABLE_KDE
+        return m_icon != nullptr || m_sni != nullptr;
+#else
+        return m_icon != nullptr;
+#endif
+    }
+    QString backendName() const;
+
+    void setAssociatedWindow(QWindow *window);
 
     void setUnread(int count, bool anyUnread);
     void setAccountLabel(const QString &label);
@@ -84,6 +99,15 @@ private:
     void refreshTooltip();
     void refreshIcon();
     void popUpMenu();
+#ifdef KAMINARI_ENABLE_KDE
+    bool useKdeSni() const;
+    void ensureSniMenu();
+    void refreshSniIcon();
+    void refreshSniTooltip();
+    KStatusNotifierItem *m_sni = nullptr;
+    QPointer<QAction> m_sniShowAction;
+    QPointer<QAction> m_sniQuitAction;
+#endif
 #ifdef Q_OS_WIN
     bool showNativeBalloon(const QString &title, const QString &body,
                            const QImage &image, bool platformSound);
@@ -96,6 +120,7 @@ private:
     std::unique_ptr<QMenu> m_menu;
     QAction *m_showAction = nullptr;
     QAction *m_quitAction = nullptr;
+    QPointer<QWindow> m_associatedWindow;
     int m_unread = 0;
     bool m_anyUnread = false;
     QString m_account;

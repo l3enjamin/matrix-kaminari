@@ -211,6 +211,12 @@ class SettingsManager : public QObject
                    NOTIFY globalShortcutsEnabledChanged)
     Q_PROPERTY(bool startInTray READ startInTray WRITE setStartInTray
                    NOTIFY startInTrayChanged)
+    Q_PROPERTY(bool autostartEnabled READ autostartEnabled
+                   WRITE setAutostartEnabled
+                   NOTIFY autostartEnabledChanged)
+    Q_PROPERTY(bool preferCameraPortal READ preferCameraPortal
+                   WRITE setPreferCameraPortal
+                   NOTIFY preferCameraPortalChanged)
     // Window size, position and maximized state from the previous launch.
     // CONSTANT on purpose: a notifying property would feed Qt's write-back of
     // x/y/width/height into the binding that produced it. Saving goes through
@@ -670,6 +676,10 @@ public:
     void setGlobalShortcutsEnabled(bool v);
     bool startInTray() const;
     void setStartInTray(bool v);
+    bool autostartEnabled() const;
+    void setAutostartEnabled(bool v);
+    bool preferCameraPortal() const;
+    void setPreferCameraPortal(bool v);
     QRect initialWindowGeometry() const { return m_initialWindowGeometry; }
     bool initialWindowMaximized() const { return m_initialWindowMaximized; }
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height);
@@ -1067,6 +1077,8 @@ Q_SIGNALS:
     void closeToTrayChanged();
     void globalShortcutsEnabledChanged();
     void startInTrayChanged();
+    void autostartEnabledChanged();
+    void preferCameraPortalChanged();
     void verificationWarningDismissedChanged();
     void dismissedSpaceBannersChanged();
     void gifAutoplayChanged();

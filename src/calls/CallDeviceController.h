@@ -23,7 +23,7 @@ class CallDeviceController : public QObject
     /// device. Lets Settings say so instead of "No camera was found". Not
     /// Snap, whose camera plug exposes the real device.
     Q_PROPERTY(bool camerasChosenByDesktop READ camerasChosenByDesktop
-                   CONSTANT)
+                   NOTIFY selectionChanged)
     Q_PROPERTY(QString activeMicrophoneId READ activeMicrophoneId
                    NOTIFY selectionChanged)
     Q_PROPERTY(QString activeSpeakerId READ activeSpeakerId

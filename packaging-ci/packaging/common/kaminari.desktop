@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Kaminari
+GenericName=Matrix Client
+Comment=Native Matrix desktop client
+Exec=kaminari --backend=rust %u
+MimeType=x-scheme-handler/matrix;
+Icon=kaminari
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=Matrix;Chat;Messaging;KDE;Plasma;
+StartupNotify=true
+StartupWMClass=kaminari

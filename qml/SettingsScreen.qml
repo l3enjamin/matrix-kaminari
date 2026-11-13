@@ -7,6 +7,11 @@ Item {
     id: root
     property string renamingSessionDeviceId: ""
     objectName: "settingsScreenRoot"
+    function brandText(s) {
+        var brand = (typeof app !== "undefined" && app && app.appDisplayName)
+            ? app.appDisplayName : "Lightning"
+        return brand === "Lightning" ? s : s.replace(/\bLightning\b/g, brand)
+    }
     // A minted recovery key must not stay in memory once the user leaves the
     // card, including on a section change: this screen is a warm Loader kept
     // alive across opens. An armed destructive confirmation is cleared too, or
@@ -2225,7 +2230,10 @@ Item {
                                         Accessible.name: qsTr("Match system light/dark")
                                         onToggled: app.settings.theme =
                                             app.settings.theme === 0
-                                                ? AppTheme.effectiveTheme : 0
+                                                ? (AppTheme.effectiveTheme === 0
+                                                   ? (AppTheme.dark ? 9 : 8)
+                                                   : AppTheme.effectiveTheme)
+                                                : 0
                                     }
                                     AppSwitch {
                                         objectName: "settingsSearchInlineShowRoomActivity_" + resultRow.index
@@ -2716,12 +2724,25 @@ Item {
                                          accent: p.accent }
                             }
                             Repeater {
-                                model: [
-                                    featuredThemeFlow.previewFor(9,  qsTr("Indigo Night")),
-                                    featuredThemeFlow.previewFor(8,  qsTr("Moss Light")),
-                                    featuredThemeFlow.previewFor(10, qsTr("Deep Teal")),
-                                    featuredThemeFlow.previewFor(11, qsTr("Storm")),
-                                ]
+                                model: (typeof app !== "undefined" && !!app
+                                        && !!app.plasmaTheme && app.plasmaTheme.active)
+                                       ? [
+                                           featuredThemeFlow.previewFor(
+                                               0,
+                                               app.plasmaTheme.schemeName.length > 0
+                                                   ? qsTr("Plasma (%1)").arg(app.plasmaTheme.schemeName)
+                                                   : qsTr("Follow Plasma")),
+                                           featuredThemeFlow.previewFor(9,  qsTr("Indigo Night")),
+                                           featuredThemeFlow.previewFor(8,  qsTr("Moss Light")),
+                                           featuredThemeFlow.previewFor(10, qsTr("Deep Teal")),
+                                           featuredThemeFlow.previewFor(11, qsTr("Storm")),
+                                       ]
+                                       : [
+                                           featuredThemeFlow.previewFor(9,  qsTr("Indigo Night")),
+                                           featuredThemeFlow.previewFor(8,  qsTr("Moss Light")),
+                                           featuredThemeFlow.previewFor(10, qsTr("Deep Teal")),
+                                           featuredThemeFlow.previewFor(11, qsTr("Storm")),
+                                       ]
                                 delegate: Rectangle {
                                     id: themeCard
                                     required property var modelData
@@ -3161,7 +3182,11 @@ Item {
                             Accessible.role: Accessible.CheckBox
                             Accessible.name: qsTr("Match system light/dark")
                             onClicked: app.settings.theme =
-                                app.settings.theme === 0 ? AppTheme.effectiveTheme : 0
+                                app.settings.theme === 0
+                                    ? (AppTheme.effectiveTheme === 0
+                                       ? (AppTheme.dark ? 9 : 8)
+                                       : AppTheme.effectiveTheme)
+                                    : 0
                             contentItem: RowLayout {
                                 id: matchRow
                                 spacing: 10
@@ -3226,8 +3251,12 @@ Item {
                             lineHeightMode: Text.ProportionalHeight
                             color: AppTheme.stormTextMuted
                             font.pixelSize: AppTheme.settingsHintSize
-                            text: qsTr("When on, Lightning follows the system scheme: "
-                                       + "Moss Light in light mode, Indigo Night in dark mode.")
+                            text: (typeof app !== "undefined" && app && app.plasmaTheme && app.plasmaTheme.active)
+                                  ? root.brandText(qsTr("Following KDE Plasma's current color scheme and accent (%1).")
+                                        .arg(app.plasmaTheme.schemeName.length > 0
+                                             ? app.plasmaTheme.schemeName : qsTr("System")))
+                                  : root.brandText(qsTr("When on, Lightning follows the system scheme: "
+                                             + "Moss Light in light mode, Indigo Night in dark mode."))
                         }
 
                         ChatBackgroundSettings {
@@ -7151,7 +7180,7 @@ Item {
                                     enabled: app.settings.notificationsEnabled
                                         && app.settings.notificationSound !== 0
                                     model: [
-                                        qsTr("Lightning"),
+                                        root.brandText(qsTr("Lightning")),
                                         qsTr("System default")
                                     ]
                                     currentIndex:
@@ -7217,14 +7246,15 @@ Item {
                                     lineHeightMode: Text.ProportionalHeight
                                     color: AppTheme.stormTextMuted
                                     font.pixelSize: AppTheme.settingsHintSize
-                                    text: qsTr("Lightning plays its own chime, and "
-                                               + "mentions get a slightly more urgent "
-                                               + "one; the desktop's notification sound "
-                                               + "is turned off. It stays quiet during "
-                                               + "calls. Choose System default to let the "
-                                               + "desktop play its own, where the desktop "
-                                               + "can; on macOS it cannot, and Lightning's "
-                                               + "chime plays instead.")
+                                    text: root.brandText(
+                                              qsTr("Lightning plays its own chime, and "
+                                                   + "mentions get a slightly more urgent "
+                                                   + "one; the desktop's notification sound "
+                                                   + "is turned off. It stays quiet during "
+                                                   + "calls. Choose System default to let the "
+                                                   + "desktop play its own, where the desktop "
+                                                   + "can; on macOS it cannot, and Lightning's "
+                                                   + "chime plays instead."))
                                 }
                                 SettingsCheckBox {
                                     objectName: "ringForCallsCheck"
@@ -7261,10 +7291,18 @@ Item {
                                                   + "from Room information) apply to "
                                                   + "this device only — they are not "
                                                   + "server push rules. "))
-                                          + qsTr("Lightning does not register for "
-                                                 + "push, so its notifications arrive "
-                                                 + "only while it is running, in the "
-                                                 + "window or the tray.")
+                                          + root.brandText(
+                                                qsTr("Lightning does not register for "
+                                                     + "push, so its notifications arrive "
+                                                     + "only while it is running, in the "
+                                                     + "window or the tray."))
+                                }
+                                AppButton {
+                                    objectName: "kdeNotificationSettingsButton"
+                                    storm: true
+                                    visible: app.kdeEnabled
+                                    text: qsTr("Open KDE Notification Settings")
+                                    onClicked: app.openKdeNotificationSettings()
                                 }
                             }
                         }

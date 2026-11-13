@@ -20,6 +20,7 @@
 #include "app/AutoMarkReadController.h"
 #include "app/SettingsManager.h"
 #include "app/CustomThemeStore.h"
+#include "theme/PlasmaThemeWatcher.h"
 #include "app/NetworkRouteController.h"
 #include "media/MediaVisibilityStore.h"
 #include "spaces/RailEntryModel.h"
@@ -151,6 +152,8 @@ class AppController : public QObject
     Q_PROPERTY(QString currentRoomId READ currentRoomId WRITE setCurrentRoomId NOTIFY currentRoomIdChanged)
     Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY loggedInChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString appDisplayName READ appDisplayName CONSTANT)
+    Q_PROPERTY(bool kdeEnabled READ kdeEnabled CONSTANT)
     // The colour emoji family, or empty when the host has none. Here rather
     // than on EmojiCatalog, whose test target links only Qt6::Core.
     Q_PROPERTY(QString emojiFontFamily READ emojiFontFamily CONSTANT)
@@ -273,6 +276,7 @@ class AppController : public QObject
     Q_PROPERTY(GlobalShortcutsPortal* globalShortcuts READ globalShortcuts CONSTANT)
     Q_PROPERTY(LocalizationManager* localization READ localization CONSTANT)
     Q_PROPERTY(CustomThemeStore* customTheme READ customTheme CONSTANT)
+    Q_PROPERTY(PlasmaThemeWatcher* plasmaTheme READ plasmaTheme CONSTANT)
     Q_PROPERTY(NetworkRouteController* networkRoute READ networkRoute CONSTANT)
     Q_PROPERTY(RailLayoutStore* railLayout READ railLayout CONSTANT)
     Q_PROPERTY(RailEntryModel* railEntries READ railEntries CONSTANT)
@@ -441,6 +445,22 @@ public:
     QString currentRoomId() const { return m_currentRoomId; }
     bool loggedIn() const;
     QString appVersion() const { return QStringLiteral(APP_VERSION); }
+    QString appDisplayName() const
+    {
+#ifdef KAMINARI_BRANDING
+        return QStringLiteral("Kaminari");
+#else
+        return QStringLiteral("Lightning");
+#endif
+    }
+    bool kdeEnabled() const
+    {
+#ifdef KAMINARI_ENABLE_KDE
+        return true;
+#else
+        return false;
+#endif
+    }
     QString emojiFontFamily() const;
 
     // A QFont with the emoji face as a fallback family. QML's font type has
@@ -522,6 +542,7 @@ public:
     GlobalShortcutsPortal *globalShortcuts() const { return m_globalShortcuts.get(); }
     LocalizationManager *localization() const;
     CustomThemeStore *customTheme() const;
+    PlasmaThemeWatcher *plasmaTheme() const { return m_plasmaTheme.get(); }
     NetworkRouteController *networkRoute() const;
     RailLayoutStore *railLayout() const;
     RailEntryModel *railEntries() const;
@@ -749,6 +770,7 @@ public Q_SLOTS:
     Q_INVOKABLE bool spaceIsMuted(const QString &spaceId) const;
     Q_INVOKABLE void markSpaceRead(const QString &spaceId);
     Q_INVOKABLE void registerMainWindow(QObject *window);
+    Q_INVOKABLE void openKdeNotificationSettings();
     static bool focusBelongsToMainWindow(const QWindow *main,
                                          const QWindow *focus);
     Q_INVOKABLE quint64 jumpToDate(qint64 timestampMs);
@@ -1201,6 +1223,7 @@ private:
     std::unique_ptr<ShortcutRegistry> m_shortcuts;
     std::unique_ptr<GlobalShortcutsPortal> m_globalShortcuts;
     std::unique_ptr<CustomThemeStore> m_customTheme;
+    std::unique_ptr<PlasmaThemeWatcher> m_plasmaTheme;
     std::unique_ptr<NetworkRouteController> m_networkRoute;
     std::unique_ptr<RailLayoutStore> m_railLayout;
     std::unique_ptr<RailEntryModel> m_railEntries;

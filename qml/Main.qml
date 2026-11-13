@@ -4,8 +4,13 @@ import QtQuick.Layouts
 import QtQuick.Window
 import MatrixClient
 
-ApplicationWindow {
+AppMainWindow {
     id: window
+
+    function brandText(s) {
+        var brand = (app && app.appDisplayName) ? app.appDisplayName : "Lightning"
+        return brand === "Lightning" ? s : s.replace(/\bLightning\b/g, brand)
+    }
 
     readonly property rect startupGeometry: app.restorableWindowGeometry
     readonly property bool hasStartupGeometry: startupGeometry.width > 0
@@ -50,8 +55,8 @@ ApplicationWindow {
         return qsTr("(%1 unread) ").arg(rooms)
     }
     title: (app.screenshotDemoActive && (!app.demo || app.demo.controlsVisible))
-           ? qsTr("Lightning — Screenshot Demo")
-           : unreadTitleSuffix + qsTr("Lightning %1").arg(app.appVersion)
+           ? window.brandText(qsTr("Lightning — Screenshot Demo"))
+           : unreadTitleSuffix + window.brandText(qsTr("Lightning %1").arg(app.appVersion))
 
     color: AppTheme.background
 
@@ -87,6 +92,10 @@ ApplicationWindow {
         target: AppTheme
         function onEffectiveThemeChanged() { window.syncControlPalette() }
         function onCustomOverridesChanged() { window.syncControlPalette() }
+    }
+    Connections {
+        target: (typeof app !== "undefined" && app && app.plasmaTheme) ? app.plasmaTheme : null
+        function onThemeChanged() { Qt.callLater(window.syncControlPalette) }
     }
 
     palette {
@@ -127,6 +136,7 @@ ApplicationWindow {
         lastMainFocus = f
     }
     Component.onCompleted: {
+        app.registerMainWindow(window)
         syncControlPalette()
         applyStartupPlacement()
         visible = true
@@ -513,7 +523,7 @@ ApplicationWindow {
                 }
                 Label {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: qsTr("Lightning")
+                    text: (app && app.appDisplayName) ? app.appDisplayName : qsTr("Lightning")
                     color: AppTheme.text
                     font.pixelSize: AppTheme.scaled(26)
                     font.weight: Font.ExtraBold
@@ -810,13 +820,13 @@ ApplicationWindow {
                 text: {
                     switch (softwareRendererNotice.noticeContext) {
                     case "appimage-nixos":
-                        return qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This is common with the AppImage on NixOS.")
+                        return window.brandText(qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This is common with the AppImage on NixOS."))
                     case "appimage":
-                        return qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This can happen when the AppImage cannot use your system's graphics driver, or in a virtual machine.")
+                        return window.brandText(qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This can happen when the AppImage cannot use your system's graphics driver, or in a virtual machine."))
                     case "nixos":
-                        return qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. On NixOS this usually means Lightning cannot reach the system's graphics driver.")
+                        return window.brandText(qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. On NixOS this usually means Lightning cannot reach the system's graphics driver."))
                     default:
-                        return qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This usually means no graphics driver is available to it, for example in a virtual machine or a remote desktop session.")
+                        return window.brandText(qsTr("Lightning is drawing on the CPU, not your graphics card, so scrolling may be slow. This usually means no graphics driver is available to it, for example in a virtual machine or a remote desktop session."))
                     }
                 }
             }

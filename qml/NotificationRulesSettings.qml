@@ -7,6 +7,12 @@ ColumnLayout {
     id: root
     objectName: "notificationRulesSection"
 
+    function brandText(s) {
+        var brand = (typeof app !== "undefined" && app && app.appDisplayName)
+            ? app.appDisplayName : "Lightning"
+        return brand === "Lightning" ? s : s.replace(/\bLightning\b/g, brand)
+    }
+
     Layout.fillWidth: true
     spacing: AppTheme.spacing12
 
@@ -448,11 +454,11 @@ ColumnLayout {
             spacing: AppTheme.spacing8
 
             Hint {
-                text: qsTr("Checks the things Lightning can see: whether "
+                text: root.brandText(qsTr("Checks the things Lightning can see: whether "
                            + "something can show a notification, the "
                            + "switches here, your account, and the room you "
                            + "have open. The test notification covers the "
-                           + "rest.")
+                           + "rest."))
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -498,8 +504,8 @@ ColumnLayout {
                                     ? qsTr("1 thing to check. Details below.")
                                     : qsTr("%1 things to check. Details below.")
                                         .arg(root.shootWarnings))
-                                 : qsTr("Nothing wrong that Lightning can see. "
-                                        + "Send a test notification to be sure."))
+                                 : root.brandText(qsTr("Nothing wrong that Lightning can see. "
+                                        + "Send a test notification to be sure.")))
                             : ""
                 }
             }

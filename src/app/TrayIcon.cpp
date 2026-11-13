@@ -10,15 +10,28 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QImage>
-#include <QPixmap>
 #include <QAction>
 #include <QMenu>
 #include <QApplication>
 #include <QCursor>
+#ifdef KAMINARI_BRANDING
+#include <QRegularExpression>
+#endif
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <QWindow>
 
 #include <algorithm>
+
+#ifdef KAMINARI_ENABLE_KDE
+#include <KStatusNotifierItem>
+#include <KWindowSystem>
+#include <kstatusnotifieritem_version.h>
+#ifdef HAVE_QT_DBUS
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#endif
+#endif
 
 #ifdef Q_OS_WIN
 #include <QLoggingCategory>
@@ -38,6 +51,42 @@ const QColor kBadgeFill = QColor(0xE5, 0x48, 0x4D);
 const QColor kBadgeInk = QColor(0xFF, 0xFF, 0xFF);
 
 constexpr int kBadgeSizes[] = { 16, 22, 24, 32, 48, 64 };
+
+QString brandDisplayName()
+{
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("Kaminari");
+#else
+    return QStringLiteral("Lightning");
+#endif
+}
+
+QString brandText(const QString &text)
+{
+#ifdef KAMINARI_BRANDING
+    static const QRegularExpression word(QStringLiteral("\\bLightning\\b"));
+    QString out = text;
+    out.replace(word, brandDisplayName());
+    return out;
+#else
+    return text;
+#endif
+}
+
+#ifdef KAMINARI_ENABLE_KDE
+QString trayIconThemeName()
+{
+#ifdef KAMINARI_BRANDING
+    if (QIcon::hasThemeIcon(QStringLiteral("kaminari-symbolic")))
+        return QStringLiteral("kaminari-symbolic");
+    if (QIcon::hasThemeIcon(QStringLiteral("kaminari")))
+        return QStringLiteral("kaminari");
+#endif
+    if (QIcon::hasThemeIcon(QStringLiteral("lightning")))
+        return QStringLiteral("lightning");
+    return {};
+}
+#endif
 
 }
 
@@ -152,6 +201,12 @@ TrayIcon::TrayIcon(QObject *parent)
 
 TrayIcon::~TrayIcon()
 {
+#ifdef KAMINARI_ENABLE_KDE
+    delete m_sni;
+    m_sni = nullptr;
+    m_sniShowAction = nullptr;
+    m_sniQuitAction = nullptr;
+#endif
 #ifdef Q_OS_WIN
     delete m_icon;
     m_icon = nullptr;
@@ -165,16 +220,145 @@ bool TrayIcon::platformSupportsTray()
     // test harnesses) the query itself dereferences what does not exist.
     if (!qobject_cast<QApplication *>(QCoreApplication::instance()))
         return false;
-    return QSystemTrayIcon::isSystemTrayAvailable();
+    if (QSystemTrayIcon::isSystemTrayAvailable())
+        return true;
+#if defined(KAMINARI_ENABLE_KDE) && defined(HAVE_QT_DBUS)
+    const QDBusConnection bus = QDBusConnection::sessionBus();
+    if (bus.isConnected() && bus.interface()
+        && bus.interface()->isServiceRegistered(
+            QStringLiteral("org.kde.StatusNotifierWatcher"))) {
+        return true;
+    }
+#endif
+    return false;
 }
+
+void TrayIcon::setAssociatedWindow(QWindow *window)
+{
+    m_associatedWindow = window;
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sni)
+        m_sni->setAssociatedWindow(window);
+#endif
+}
+
+QString TrayIcon::backendName() const
+{
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sni)
+        return QStringLiteral("kstatusnotifieritem");
+#endif
+    if (m_icon)
+        return QStringLiteral("qsystemtrayicon");
+    return QStringLiteral("none");
+}
+
+#ifdef KAMINARI_ENABLE_KDE
+bool TrayIcon::useKdeSni() const
+{
+    if (qEnvironmentVariableIsSet("KAMINARI_DISABLE_KSNI"))
+        return false;
+    if (qEnvironmentVariableIsSet("KAMINARI_FORCE_KSNI"))
+        return true;
+    const QString platform = QGuiApplication::platformName();
+    if (platform.startsWith(QLatin1String("offscreen"))
+        || platform.startsWith(QLatin1String("minimal")))
+        return false;
+#ifdef HAVE_QT_DBUS
+    const QDBusConnection bus = QDBusConnection::sessionBus();
+    if (bus.isConnected() && bus.interface()
+        && bus.interface()->isServiceRegistered(
+            QStringLiteral("org.kde.StatusNotifierWatcher"))) {
+        return true;
+    }
+#endif
+    return qEnvironmentVariable("XDG_CURRENT_DESKTOP")
+        .contains(QLatin1String("KDE"), Qt::CaseInsensitive);
+}
+
+void TrayIcon::ensureSniMenu()
+{
+    if (!m_sni || m_sniShowAction || m_sniQuitAction)
+        return;
+    // KStatusNotifierItem::setContextMenu takes ownership and deletes the
+    // QMenu on teardown, so it must not share TrayIcon::m_menu.
+    auto *menu = new QMenu();
+    m_sniShowAction = menu->addAction(brandText(tr("Show Lightning")));
+    connect(m_sniShowAction, &QAction::triggered, this, &TrayIcon::showRequested);
+    menu->addSeparator();
+    m_sniQuitAction = menu->addAction(brandText(tr("Quit Lightning")));
+    connect(m_sniQuitAction, &QAction::triggered, this, &TrayIcon::quitRequested);
+    m_sni->setContextMenu(menu);
+}
+
+void TrayIcon::refreshSniIcon()
+{
+    if (!m_sni)
+        return;
+    const QString themeIcon = trayIconThemeName();
+    if (!themeIcon.isEmpty()) {
+        m_sni->setIconByName(themeIcon);
+        m_sni->setAttentionIconByName(themeIcon);
+    } else {
+        const QIcon base = QGuiApplication::windowIcon();
+        m_sni->setIconByPixmap(base);
+        m_sni->setAttentionIconByPixmap(base);
+    }
+    const QString label = badgeLabel(m_unread, m_anyUnread);
+    if (label.isEmpty()) {
+        m_sni->setOverlayIconByPixmap(QIcon());
+        m_sni->setStatus(KStatusNotifierItem::Active);
+        return;
+    }
+    QIcon overlay;
+    for (const int side : { 22, 44 }) {
+        QPixmap canvas(side, side);
+        canvas.fill(Qt::transparent);
+        if (side == 44)
+            canvas.setDevicePixelRatio(2.0);
+        overlay.addPixmap(TrayIcon::badged(canvas, label));
+    }
+    m_sni->setOverlayIconByPixmap(overlay);
+    m_sni->setStatus(KStatusNotifierItem::NeedsAttention);
+}
+
+void TrayIcon::refreshSniTooltip()
+{
+    if (!m_sni)
+        return;
+    const QString themeIcon = trayIconThemeName();
+    if (!themeIcon.isEmpty())
+        m_sni->setToolTipIconByName(themeIcon);
+    else
+        m_sni->setToolTipIconByPixmap(QGuiApplication::windowIcon());
+    m_sni->setToolTipTitle(brandDisplayName());
+    QStringList parts;
+    if (!m_account.isEmpty())
+        parts.append(m_account);
+    if (m_unread > 0) {
+        parts.append(
+            tr("%n unread message(s)", "system tray tooltip", m_unread));
+    } else if (m_anyUnread) {
+        parts.append(tr("Unread messages",
+                        "system tray tooltip, unread rooms without a count"));
+    }
+    m_sni->setToolTipSubTitle(parts.join(QStringLiteral(" \u2014 ")));
+}
+#endif
 
 void TrayIcon::setEnabled(bool enabled)
 {
-    if (enabled == (m_icon != nullptr))
+    if (enabled == this->enabled())
         return;
     if (!enabled) {
         delete m_icon;
         m_icon = nullptr;
+#ifdef KAMINARI_ENABLE_KDE
+        delete m_sni;
+        m_sni = nullptr;
+        m_sniShowAction = nullptr;
+        m_sniQuitAction = nullptr;
+#endif
 #ifdef Q_OS_WIN
         releaseBalloonIcon();
 #endif
@@ -182,6 +366,53 @@ void TrayIcon::setEnabled(bool enabled)
     }
     if (!platformSupportsTray())
         return;
+
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKdeSni()) {
+#ifdef KAMINARI_BRANDING
+        const QString sniId = QStringLiteral("kaminari");
+#else
+        const QString sniId = QStringLiteral("lightning");
+#endif
+#if KSTATUSNOTIFIERITEM_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+        m_sni = new KStatusNotifierItem(sniId, this);
+#else
+        Q_UNUSED(sniId);
+        m_sni = new KStatusNotifierItem(this);
+#endif
+        m_sni->setCategory(KStatusNotifierItem::Communications);
+        m_sni->setStandardActionsEnabled(false);
+        if (m_associatedWindow)
+            m_sni->setAssociatedWindow(m_associatedWindow);
+        ensureSniMenu();
+        refreshSniIcon();
+        refreshSniTooltip();
+        connect(m_sni, &KStatusNotifierItem::activateRequested, this,
+                [this](bool active, const QPoint &) {
+                    const QString token =
+                        m_sni ? m_sni->providedToken() : QString();
+                    if (!token.isEmpty()) {
+                        KWindowSystem::setCurrentXdgActivationToken(token);
+                        if (KWindowSystem::isPlatformWayland())
+                            qputenv("XDG_ACTIVATION_TOKEN", token.toUtf8());
+                    }
+                    if (active || !m_associatedWindow
+                        || !m_associatedWindow->isVisible()) {
+                        Q_EMIT showRequested();
+                    } else {
+                        m_associatedWindow->hide();
+                    }
+                });
+#if KSTATUSNOTIFIERITEM_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+        connect(m_sni, &KStatusNotifierItem::quitRequested, this, [this] {
+            if (m_sni)
+                m_sni->abortQuit();
+            Q_EMIT quitRequested();
+        });
+#endif
+        return;
+    }
+#endif
 
     m_icon = new QSystemTrayIcon(this);
     refreshIcon();
@@ -211,10 +442,10 @@ QMenu *TrayIcon::contextMenu()
     if (m_menu)
         return m_menu.get();
     m_menu = std::make_unique<QMenu>();
-    m_showAction = m_menu->addAction(tr("Show Lightning"));
+    m_showAction = m_menu->addAction(brandText(tr("Show Lightning")));
     connect(m_showAction, &QAction::triggered, this, &TrayIcon::showRequested);
     m_menu->addSeparator();
-    m_quitAction = m_menu->addAction(tr("Quit Lightning"));
+    m_quitAction = m_menu->addAction(brandText(tr("Quit Lightning")));
     connect(m_quitAction, &QAction::triggered, this, &TrayIcon::quitRequested);
     return m_menu.get();
 }
@@ -229,9 +460,15 @@ int TrayIcon::effectiveActivationReason(int reason, bool isMac, bool controlHeld
 void TrayIcon::retranslate()
 {
     if (m_showAction)
-        m_showAction->setText(tr("Show Lightning"));
+        m_showAction->setText(brandText(tr("Show Lightning")));
     if (m_quitAction)
-        m_quitAction->setText(tr("Quit Lightning"));
+        m_quitAction->setText(brandText(tr("Quit Lightning")));
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sniShowAction)
+        m_sniShowAction->setText(brandText(tr("Show Lightning")));
+    if (m_sniQuitAction)
+        m_sniQuitAction->setText(brandText(tr("Quit Lightning")));
+#endif
     refreshTooltip();
 }
 
@@ -290,6 +527,10 @@ void TrayIcon::setUnread(int count, bool anyUnread)
 
 void TrayIcon::refreshIcon()
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sni)
+        refreshSniIcon();
+#endif
     if (!m_icon)
         return;
     const QString label = badgeLabel(m_unread, m_anyUnread);
@@ -326,6 +567,10 @@ void TrayIcon::setAccountLabel(const QString &label)
 
 void TrayIcon::refreshTooltip()
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sni)
+        refreshSniTooltip();
+#endif
     if (!m_icon)
         return;
     m_icon->setToolTip(tooltipText(m_account, m_unread, m_anyUnread));
@@ -333,7 +578,7 @@ void TrayIcon::refreshTooltip()
 
 QString TrayIcon::tooltipText(const QString &account, int unread, bool anyUnread)
 {
-    QString text = QStringLiteral("Lightning");
+    QString text = brandDisplayName();
     if (!account.isEmpty())
         text += QStringLiteral(" — ") + account;
     if (unread > 0) {
@@ -415,6 +660,20 @@ void TrayIcon::hideMessage()
 bool TrayIcon::showMessage(const QString &title, const QString &body,
                            const QImage &image, bool platformSound)
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_sni) {
+        Q_UNUSED(image);
+        Q_UNUSED(platformSound);
+#ifdef KAMINARI_BRANDING
+        const QString iconName = QStringLiteral("kaminari");
+#else
+        const QString iconName = QStringLiteral("lightning");
+#endif
+        m_sni->showMessage(title, body, iconName,
+                           balloonTimeoutMs(closebehavior::kIsMac));
+        return true;
+    }
+#endif
     if (!m_icon || !m_icon->isVisible())
         return false;
 #ifdef Q_OS_WIN

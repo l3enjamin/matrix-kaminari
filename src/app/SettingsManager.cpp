@@ -82,6 +82,8 @@ constexpr auto kGlobalShortcuts   = "shell/globalShortcuts";
 constexpr auto kWindowGeometry    = "shell/windowGeometry";
 constexpr auto kWindowMaximized   = "shell/windowMaximized";
 constexpr auto kStartInTray       = "shell/startInTray";
+constexpr auto kAutostartEnabled  = "desktop/autostartEnabled";
+constexpr auto kPreferCameraPortal = "calls/preferCameraPortal";
 constexpr auto kVerifyWarningDismissed = "security/verifyWarningDismissed";
 constexpr auto kMediaVolume         = "media/volume";
 constexpr auto kMediaPlaybackRate   = "media/playbackRate";
@@ -3807,6 +3809,32 @@ void SettingsManager::setStartInTray(bool v)
         return;
     m_store->setValue(kStartInTray, v);
     Q_EMIT startInTrayChanged();
+}
+
+bool SettingsManager::autostartEnabled() const
+{
+    return m_store->value(kAutostartEnabled, false).toBool();
+}
+
+void SettingsManager::setAutostartEnabled(bool v)
+{
+    if (autostartEnabled() == v)
+        return;
+    m_store->setValue(kAutostartEnabled, v);
+    Q_EMIT autostartEnabledChanged();
+}
+
+bool SettingsManager::preferCameraPortal() const
+{
+    return m_store->value(kPreferCameraPortal, false).toBool();
+}
+
+void SettingsManager::setPreferCameraPortal(bool v)
+{
+    if (preferCameraPortal() == v)
+        return;
+    m_store->setValue(kPreferCameraPortal, v);
+    Q_EMIT preferCameraPortalChanged();
 }
 
 void SettingsManager::loadWindowGeometry()

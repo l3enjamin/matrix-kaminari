@@ -1,14 +1,18 @@
 #pragma once
 
+#include <QHash>
+#include <QMetaObject>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QVariantMap>
 
 #ifdef HAVE_QT_DBUS
 #include <QDBusObjectPath>
 #endif
 
+class QAction;
 class ShortcutRegistry;
 #ifdef HAVE_QT_DBUS
 class QDBusServiceWatcher;
@@ -20,6 +24,8 @@ class GlobalShortcutsPortal : public QObject
     Q_PROPERTY(State state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool canConfigure READ canConfigure NOTIFY stateChanged)
+    Q_PROPERTY(QString backendName READ backendName NOTIFY stateChanged)
+    Q_PROPERTY(QVariantList activeBindings READ activeBindings NOTIFY stateChanged)
 
 public:
     enum State {
@@ -32,6 +38,7 @@ public:
     Q_ENUM(State)
 
     static QStringList actionIds();
+    static QStringList kdeActionIds();
 
     static QString portalTrigger(const QString &portableText);
 
@@ -43,8 +50,11 @@ public:
     QString statusText() const;
     bool canConfigure() const;
     bool enabled() const { return m_enabled; }
+    QString backendName() const;
+    QVariantList activeBindings() const;
 
     void setEnabled(bool enabled);
+    void setKdeBackendForcedForTest(int mode) { m_kdeBackendForced = mode; }
 
     Q_INVOKABLE void configure();
 
@@ -67,6 +77,10 @@ private Q_SLOTS:
 #endif
 
 private:
+    bool useKdeBackend() const;
+    void setupKdeActions();
+    void teardownKdeActions(bool forgetShortcuts);
+    void refreshKdeActionTexts();
     void start();
     void stop();
     void teardown();
@@ -88,6 +102,14 @@ private:
     QString m_sessionHandle;
     int m_generation = 0;
     bool m_subscribed = false;
+    bool m_usingKde = false;
+    int m_kdeBackendForced = -1;
+    QHash<QString, QString> m_portalTriggers;
+#ifdef KAMINARI_ENABLE_KDE
+    QHash<QString, QAction *> m_kdeActions;
+    QMetaObject::Connection m_activeChangedConn;
+    QMetaObject::Connection m_shortcutChangedConn;
+#endif
 #ifdef HAVE_QT_DBUS
     /// Owner changes of the portal's bus name: a restarted portal sends no
     /// Session.Closed, so this is the only way to learn the session is gone.

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.kaminari_matrix.Kaminari</id>
+  <name>Kaminari</name>
+  <summary>Native KDE Plasma client for Matrix</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Kaminari is a native KDE Frameworks 6 and Kirigami edition of Lightning, a
+      desktop messenger for Matrix, the open network for secure, decentralised
+      communication.
+    </p>
+    <p>
+      Conversations are organised into Spaces, rooms and threads. Send rich
+      text, pictures, files, voice messages, polls, reactions and custom emoji,
+      and find something you sent months ago without scrolling back to it.
+    </p>
+    <p>
+      Private rooms are end-to-end encrypted throughout: verify your other
+      devices by comparing emoji, restore your keys from backup, and search
+      even your encrypted rooms with an index that never leaves this computer.
+    </p>
+    <p>
+      Group voice calls and screen sharing run in the room itself, with Plasma
+      color-scheme sync, native StatusNotifierItem system tray, KNotifications,
+      and KDE global shortcuts.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">kaminari.desktop</launchable>
+
+  <provides>
+    <binary>kaminari</binary>
+  </provides>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#AAD4FF</color>
+    <color type="primary" scheme_preference="dark">#202473</color>
+  </branding>
+
+  <keywords>
+    <keyword>Matrix</keyword>
+    <keyword>chat</keyword>
+    <keyword>messaging</keyword>
+    <keyword>encrypted</keyword>
+    <keyword>calls</keyword>
+    <keyword>KDE</keyword>
+    <keyword>Plasma</keyword>
+    <keyword>Kirigami</keyword>
+  </keywords>
+
+  <url type="homepage">https://www.lightning-matrix.org</url>
+  <url type="bugtracker">https://github.com/Mizerd/lightning/issues</url>
+  <url type="vcs-browser">https://github.com/Mizerd/lightning</url>
+  <url type="contribute">https://github.com/Mizerd/lightning/blob/main/CONTRIBUTING.md</url>
+  <url type="translate">https://github.com/Mizerd/lightning/blob/main/docs/localization.md</url>
+  <url type="contact">https://matrix.to/#/%23lightning%3Amatrix.smetonis.net</url>
+
+  <developer id="net.smetonis">
+    <name>Rokas Smetonis</name>
+  </developer>
+
+  <requires>
+    <internet>always</internet>
+    <display_length compare="ge">640</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-audio">intense</content_attribute>
+    <content_attribute id="social-info">mild</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="0.10.5" date="2026-11-07" type="stable">
+      <url type="details">https://github.com/Mizerd/lightning/releases/tag/v0.10.5</url>
+      <description>
+        <p>
+          Kirigami 6 and KDE Plasma 6 native desktop edition matching Lightning
+          0.10.5, with live Plasma color-scheme sync, StatusNotifierItem tray,
+          KNotifications, and KDE GlobalAccel hotkeys.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

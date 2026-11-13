@@ -161,6 +161,18 @@ if(LIGHTNING_ENABLE_SCREENSHOT_DEMO AND LIGHTNING_RUST_ONLY)
         "compiled into a Rust-only release binary.")
 endif()
 
+option(KAMINARI_ENABLE_KDE
+    "Enable Kirigami 6 & KDE Frameworks 6 Plasma desktop integration" OFF)
+option(KAMINARI_BRANDING
+    "Brand executable, desktop entry, storage paths, and UI as Kaminari" OFF)
+if(KAMINARI_ENABLE_KDE AND (WIN32 OR APPLE))
+    message(FATAL_ERROR
+        "KAMINARI_ENABLE_KDE=ON is supported only on Linux/Unix desktops.")
+endif()
+if(KAMINARI_BRANDING)
+    add_compile_definitions(KAMINARI_BRANDING=1)
+endif()
+
 # ---------------------------------------------------------------------------
 # Build-only GIF provider keys. A -P script reads
 # LIGHTNING_BUILD_GIPHY_API_KEY / LIGHTNING_BUILD_KLIPY_API_KEY from the
@@ -239,6 +251,27 @@ endif()
 find_package(Qt6 6.5 COMPONENTS DBus)
 
 qt_standard_project_setup(REQUIRES 6.5)
+
+if(KAMINARI_ENABLE_KDE)
+    find_package(ECM 6.0 REQUIRED NO_MODULE)
+    list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+    include(KDEInstallDirs)
+    include(ECMFindQmlModule)
+    find_package(KF6 6.0 REQUIRED COMPONENTS
+        ColorScheme
+        Config
+        CoreAddons
+        GlobalAccel
+        Kirigami
+        Notifications
+        StatusNotifierItem
+        WindowSystem
+    )
+    ecm_find_qml_module(org.kde.kirigami REQUIRED)
+    message(STATUS "KDE Frameworks 6 / Kirigami integration: enabled")
+else()
+    message(STATUS "KDE Frameworks 6 / Kirigami integration: disabled")
+endif()
 
 # No symbol from Qt's PRIVATE ABI in the binary. Distributions tag Qt's private
 # symbols per minor (Fedora: Qt_6.11_PRIVATE_API) or per patch (openSUSE:
@@ -624,6 +657,8 @@ set(APP_SOURCES
     src/app/RepeatLogLimiter.cpp
     src/app/GlobalShortcutsPortal.h
     src/app/GlobalShortcutsPortal.cpp
+    src/app/BackgroundPortal.h
+    src/app/BackgroundPortal.cpp
     src/app/ShortcutRegistry.h
     src/app/ShortcutRegistry.cpp
     src/settings/SettingsPortable.h
@@ -859,6 +894,8 @@ set(APP_SOURCES
     src/theme/IdentityColors.h
     src/theme/IdentityColors.cpp
     src/theme/IdentityPalette.h
+    src/theme/PlasmaThemeWatcher.h
+    src/theme/PlasmaThemeWatcher.cpp
     src/media/MediaManager.h
     src/media/MediaManager.cpp
     src/app/UrlLauncher.h
@@ -1118,9 +1155,11 @@ set(APP_LIB_SOURCES ${APP_SOURCES})
 list(REMOVE_ITEM APP_LIB_SOURCES src/main.cpp)
 
 set(APP_QML_FILES
+    qml/AppMainWindow.qml
     qml/Main.qml
     qml/SharedToolTipGuard.qml
     qml/Icon.qml
+    qml/ThemeIcon.qml
     qml/IconGlyphs.js
     qml/IconButton.qml
     qml/AppButton.qml
@@ -1410,6 +1449,21 @@ set_source_files_properties(qml/MotionPolicy.qml
 set_source_files_properties(qml/SpoilerState.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
+# Allow QQmlFileSelector (+kde/AppMainWindow.qml, +kde/ThemeIcon.qml) to swap
+# cleanly at runtime without AOT cache bypassing the selector.
+set_source_files_properties(qml/AppMainWindow.qml qml/ThemeIcon.qml
+    PROPERTIES QT_QML_SKIP_CACHEGEN TRUE)
+set(KDE_QML_SELECTOR_RESOURCES)
+if(KAMINARI_ENABLE_KDE)
+    set_source_files_properties(qml/+kde/AppMainWindow.qml
+        PROPERTIES QT_RESOURCE_ALIAS "+kde/AppMainWindow.qml")
+    set_source_files_properties(qml/+kde/ThemeIcon.qml
+        PROPERTIES QT_RESOURCE_ALIAS "+kde/ThemeIcon.qml")
+    set(KDE_QML_SELECTOR_RESOURCES
+        qml/+kde/AppMainWindow.qml
+        qml/+kde/ThemeIcon.qml)
+endif()
+
 # Development-only demo media fixtures (scripts/generate-demo-media.sh),
 # bundled only when the demo option is on. Resolved at runtime as
 # :/qt/qml/MatrixClient/resources/screenshot-demo/<file>.
@@ -1494,6 +1548,7 @@ function(_lightning_configure_qml_module target _scope)
             data/icons/menubar/lightning-template-36.png
             data/icons/menubar/lightning-template-40.png
             data/icons/menubar/lightning-template-44.png
+            ${KDE_QML_SELECTOR_RESOURCES}
             # Development-only demo media fixtures (empty list in a release
             # build; see DEMO_MEDIA_RESOURCES above).
             ${DEMO_MEDIA_RESOURCES}
@@ -1583,6 +1638,23 @@ function(_lightning_configure_qml_module target _scope)
     if(TARGET Qt6::DBus AND NOT WIN32 AND NOT APPLE)
         target_link_libraries(${target} ${_scope} Qt6::DBus)
         target_compile_definitions(${target} ${_scope} HAVE_QT_DBUS=1)
+    endif()
+    if(KAMINARI_ENABLE_KDE)
+        target_compile_definitions(${target} ${_scope} KAMINARI_ENABLE_KDE=1)
+        target_link_libraries(${target} ${_scope}
+            KF6::ColorScheme
+            KF6::ConfigCore
+            KF6::ConfigGui
+            KF6::CoreAddons
+            KF6::GlobalAccel
+            KF6::Kirigami
+            KF6::Notifications
+            KF6::StatusNotifierItem
+            KF6::WindowSystem
+        )
+        if(TARGET KF6::KirigamiPlatform)
+            target_link_libraries(${target} ${_scope} KF6::KirigamiPlatform)
+        endif()
     endif()
 
     target_compile_definitions(${target} ${_scope}
@@ -1764,6 +1836,9 @@ endif()
 # separate literal in src/main.cpp and must not follow this name.
 qt_add_executable(lightning-matrix ${APP_MAIN_SOURCES})
 lightning_configure_qml_app(lightning-matrix)
+if(KAMINARI_BRANDING)
+    set_target_properties(lightning-matrix PROPERTIES OUTPUT_NAME "kaminari")
+endif()
 if(LIGHTNING_TEST_LOOPBACK_FOCI)
     target_compile_definitions(lightning-matrix PRIVATE LIGHTNING_TEST_LOOPBACK_FOCI=1)
 endif()
@@ -7920,6 +7995,33 @@ if(LIGHTNING_INSTALL_TYPE STREQUAL "linux-flatpak")
 
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${_lightning_appid}")
+elseif(KAMINARI_BRANDING)
+    install(FILES data/kaminari.desktop
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    foreach(_icon_size 16 32 48 64 128 192 256 512)
+        install(FILES
+            "data/icons/hicolor/${_icon_size}x${_icon_size}/apps/lightning.png"
+            DESTINATION
+            "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_icon_size}x${_icon_size}/apps"
+            RENAME kaminari.png)
+    endforeach()
+    # The scalable icon and monochrome Plasma tray icon.
+    install(FILES data/icons/lightning.svg
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+        RENAME kaminari.svg)
+    install(FILES data/icons/kaminari-symbolic.svg
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/symbolic/apps")
+    install(FILES packaging-ci/packaging/common/kaminari.metainfo.xml
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+    if(KAMINARI_ENABLE_KDE)
+        if(DEFINED KDE_INSTALL_KNOTIFYRCDIR)
+            set(_kaminari_knotifyrc_dir "${KDE_INSTALL_KNOTIFYRCDIR}")
+        else()
+            set(_kaminari_knotifyrc_dir "${CMAKE_INSTALL_DATADIR}/knotifications6")
+        endif()
+        install(FILES data/kaminari.notifyrc
+            DESTINATION "${_kaminari_knotifyrc_dir}")
+    endif()
 else()
     install(FILES data/lightning.desktop
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
@@ -7933,6 +8035,25 @@ else()
     install(FILES data/icons/lightning.svg
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
         RENAME lightning.svg)
+    if(KAMINARI_ENABLE_KDE)
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/data/kaminari.notifyrc"
+            _lightning_notifyrc)
+        string(REPLACE "IconName=kaminari" "IconName=lightning"
+            _lightning_notifyrc "${_lightning_notifyrc}")
+        string(REPLACE "Name=Kaminari" "Name=Lightning"
+            _lightning_notifyrc "${_lightning_notifyrc}")
+        string(REPLACE "DesktopEntry=kaminari.desktop" "DesktopEntry=lightning.desktop"
+            _lightning_notifyrc "${_lightning_notifyrc}")
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/kde/matrix-client.notifyrc"
+            "${_lightning_notifyrc}")
+        if(DEFINED KDE_INSTALL_KNOTIFYRCDIR)
+            set(_kaminari_knotifyrc_dir "${KDE_INSTALL_KNOTIFYRCDIR}")
+        else()
+            set(_kaminari_knotifyrc_dir "${CMAKE_INSTALL_DATADIR}/knotifications6")
+        endif()
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/kde/matrix-client.notifyrc"
+            DESTINATION "${_kaminari_knotifyrc_dir}")
+    endif()
 endif()
 
 # Dismissing a link preview: per-(room,event) keying, dismissal checked before

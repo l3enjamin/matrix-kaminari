@@ -423,7 +423,7 @@ void BackgroundSessionHost::handleQueued(const QString &raw)
                 tr("Verification request · %1")
                     .arg(QChar(0x2068) + m_identity.label + QChar(0x2069)),
                 tr("Open this account to answer it."), QString(), QString(), true, key,
-                m_identity.userId);
+                m_identity.userId, QStringLiteral("verification_request"));
         }
         return;
     }

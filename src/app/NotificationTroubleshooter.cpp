@@ -1,5 +1,8 @@
 #include "app/NotificationTroubleshooter.h"
 
+#ifdef KAMINARI_BRANDING
+#include <QRegularExpression>
+#endif
 #include <QSystemTrayIcon>
 #include <QVariantMap>
 
@@ -9,6 +12,18 @@
 #endif
 
 namespace {
+
+QString brandText(const QString &text)
+{
+#ifdef KAMINARI_BRANDING
+    static const QRegularExpression word(QStringLiteral("\\bLightning\\b"));
+    QString out = text;
+    out.replace(word, QStringLiteral("Kaminari"));
+    return out;
+#else
+    return text;
+#endif
+}
 
 QVariantMap check(const QString &id, const QString &title,
                   NotificationTroubleshooter::Status status,
@@ -83,16 +98,16 @@ QVariantList NotificationTroubleshooter::evaluate(const Inputs &in)
         if (in.trayIconShown) {
             out.append(check(QStringLiteral("delivery"),
                              tr("Notifications use the tray icon"), Pass,
-                             tr("Lightning shows notifications as balloons from "
-                                "its tray icon on this system, and the icon is "
-                                "showing.")));
+                             brandText(tr("Lightning shows notifications as balloons from "
+                                          "its tray icon on this system, and the icon is "
+                                          "showing."))));
         } else {
             out.append(check(
                 QStringLiteral("delivery"),
                 tr("The tray icon is not showing"), Fail,
-                tr("Notifications can only appear as balloons from Lightning's "
-                   "tray icon here, and the icon is hidden. Turn on keeping "
-                   "Lightning in the tray, or start a notification service.")));
+                brandText(tr("Notifications can only appear as balloons from Lightning's "
+                             "tray icon here, and the icon is hidden. Turn on keeping "
+                             "Lightning in the tray, or start a notification service."))));
         }
         break;
     case NoPath:
@@ -111,19 +126,19 @@ QVariantList NotificationTroubleshooter::evaluate(const Inputs &in)
 
     QString osDetail;
     if (in.platform == QLatin1String("macos")) {
-        osDetail = tr("Lightning cannot read whether macOS allows its "
-                      "notifications or whether a Focus mode is on. If the test "
-                      "below does not appear, check System Settings, "
-                      "Notifications and Focus.");
+        osDetail = brandText(tr("Lightning cannot read whether macOS allows its "
+                                "notifications or whether a Focus mode is on. If the test "
+                                "below does not appear, check System Settings, "
+                                "Notifications and Focus."));
     } else if (in.platform == QLatin1String("windows")) {
-        osDetail = tr("Lightning cannot read whether Windows allows its "
-                      "notifications or whether Focus assist is on. If the test "
-                      "below does not appear, check Settings, System, "
-                      "Notifications.");
+        osDetail = brandText(tr("Lightning cannot read whether Windows allows its "
+                                "notifications or whether Focus assist is on. If the test "
+                                "below does not appear, check Settings, System, "
+                                "Notifications."));
     } else {
-        osDetail = tr("Lightning cannot read whether your desktop is in Do Not "
-                      "Disturb or has muted Lightning. If the test below does "
-                      "not appear, check your desktop's notification settings.");
+        osDetail = brandText(tr("Lightning cannot read whether your desktop is in Do Not "
+                                "Disturb or has muted Lightning. If the test below does "
+                                "not appear, check your desktop's notification settings."));
     }
     out.append(check(QStringLiteral("system"),
                      tr("System permission and Do Not Disturb"), Unknown,
@@ -131,9 +146,9 @@ QVariantList NotificationTroubleshooter::evaluate(const Inputs &in)
 
     out.append(in.appEnabled
         ? check(QStringLiteral("app"), tr("Desktop notifications are on"), Pass,
-                tr("Lightning is allowed to show notifications."))
+                brandText(tr("Lightning is allowed to show notifications.")))
         : check(QStringLiteral("app"), tr("Desktop notifications are off"), Fail,
-                tr("Lightning is set not to show any desktop notification."),
+                brandText(tr("Lightning is set not to show any desktop notification.")),
                 QStringLiteral("enableApp")));
 
     if (!in.rulesKnown) {

@@ -8,6 +8,13 @@
 #include <QLoggingCategory>
 #include <QRandomGenerator>
 
+#ifdef KAMINARI_ENABLE_KDE
+#include <KGlobalAccel>
+#include <QAction>
+#include <QProcess>
+#include <QStandardPaths>
+#endif
+
 #ifdef HAVE_QT_DBUS
 #include "calls/PortalRequest.h"
 
@@ -25,6 +32,34 @@
 
 namespace {
 Q_LOGGING_CATEGORY(lcGlobalShortcuts, "lightning.app.globalshortcuts")
+
+#ifdef KAMINARI_ENABLE_KDE
+QString kdeComponentName()
+{
+    QString id = QGuiApplication::desktopFileName();
+    if (id.endsWith(QLatin1String(".desktop")))
+        id.chop(8);
+    if (!id.isEmpty())
+        return id;
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("kaminari");
+#else
+    return QStringLiteral("lightning");
+#endif
+}
+
+QString kdeComponentDisplayName()
+{
+    const QString display = QGuiApplication::applicationDisplayName();
+    if (!display.isEmpty())
+        return display;
+#ifdef KAMINARI_BRANDING
+    return QStringLiteral("Kaminari");
+#else
+    return QStringLiteral("Lightning");
+#endif
+}
+#endif
 
 #ifdef HAVE_QT_DBUS
 constexpr auto kService = "org.freedesktop.portal.Desktop";
@@ -110,6 +145,17 @@ QStringList GlobalShortcutsPortal::actionIds()
              QStringLiteral("call.leave") };
 }
 
+QStringList GlobalShortcutsPortal::kdeActionIds()
+{
+    return { QStringLiteral("call.toggleMute"),
+             QStringLiteral("call.toggleDeafen"),
+             QStringLiteral("call.leave"),
+             QStringLiteral("call.pushToTalk"),
+             QStringLiteral("app.toggleWindow"),
+             QStringLiteral("nav.quickSwitcher"),
+             QStringLiteral("room.markRead") };
+}
+
 namespace {
 QString xkbKeyName(int key)
 {
@@ -189,11 +235,54 @@ GlobalShortcutsPortal::GlobalShortcutsPortal(ShortcutRegistry *registry,
     qDBusRegisterMetaType<PortalShortcut>();
     qDBusRegisterMetaType<QList<PortalShortcut>>();
 #endif
+    if (m_registry) {
+        connect(m_registry, &QAbstractItemModel::modelReset, this, [this] {
+            if (m_usingKde) {
+                refreshKdeActionTexts();
+                Q_EMIT stateChanged();
+            }
+        });
+        connect(m_registry, &ShortcutRegistry::bindingsChanged, this, [this] {
+            if (m_state == Active && !m_usingKde)
+                Q_EMIT stateChanged();
+        });
+    }
 }
 
 GlobalShortcutsPortal::~GlobalShortcutsPortal()
 {
     teardown();
+}
+
+bool GlobalShortcutsPortal::useKdeBackend() const
+{
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_kdeBackendForced == 0)
+        return false;
+    if (m_kdeBackendForced == 1
+        || !qEnvironmentVariableIsEmpty("KAMINARI_FORCE_KGLOBALACCEL"))
+        return true;
+    if (!qEnvironmentVariableIsEmpty("KAMINARI_DISABLE_KGLOBALACCEL"))
+        return false;
+    const QString platform = QGuiApplication::platformName();
+    if (platform.startsWith(QLatin1String("offscreen"))
+        || platform.startsWith(QLatin1String("minimal")))
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+QString GlobalShortcutsPortal::backendName() const
+{
+    if (m_usingKde || useKdeBackend())
+        return QStringLiteral("kglobalaccel");
+#ifdef HAVE_QT_DBUS
+    return QStringLiteral("portal");
+#else
+    return QStringLiteral("none");
+#endif
 }
 
 QString GlobalShortcutsPortal::statusText() const
@@ -207,6 +296,10 @@ QString GlobalShortcutsPortal::statusText() const
         return tr("Waiting for your desktop. It may ask you to allow "
                   "global shortcuts.");
     case Active:
+        if (m_usingKde) {
+            return tr("On. Registered with KDE Global Shortcuts. You can "
+                      "assign or change keys in System Settings.");
+        }
         return tr("On. Your desktop owns these keys, so it can also change "
                   "them.");
     case Failed:
@@ -217,7 +310,56 @@ QString GlobalShortcutsPortal::statusText() const
 
 bool GlobalShortcutsPortal::canConfigure() const
 {
+    if (m_usingKde)
+        return m_state == Active;
     return m_state == Active && m_version >= 2;
+}
+
+QVariantList GlobalShortcutsPortal::activeBindings() const
+{
+    QVariantList out;
+    if (m_state != Active)
+        return out;
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_usingKde) {
+        for (const QString &id : kdeActionIds()) {
+            const QAction *action = m_kdeActions.value(id);
+            const QList<QKeySequence> seqs =
+                action ? KGlobalAccel::self()->shortcut(action)
+                       : QList<QKeySequence>{};
+            const QKeySequence primary =
+                seqs.isEmpty() ? QKeySequence() : seqs.first();
+            const QString seq = primary.toString(QKeySequence::PortableText);
+            const QString display = primary.toString(QKeySequence::NativeText);
+            out.append(QVariantMap{
+                { QStringLiteral("id"), id },
+                { QStringLiteral("description"),
+                  m_registry ? m_registry->descriptionFor(id) : id },
+                { QStringLiteral("sequence"), seq },
+                { QStringLiteral("displayText"), display },
+            });
+        }
+        return out;
+    }
+#endif
+    for (const QString &id : actionIds()) {
+        const QString seq = m_registry ? m_registry->sequenceFor(id) : QString();
+        const QString display =
+            m_portalTriggers.value(id).isEmpty()
+                ? (seq.isEmpty() ? QString()
+                                 : QKeySequence::fromString(
+                                       seq, QKeySequence::PortableText)
+                                       .toString(QKeySequence::NativeText))
+                : m_portalTriggers.value(id);
+        out.append(QVariantMap{
+            { QStringLiteral("id"), id },
+            { QStringLiteral("description"),
+              m_registry ? m_registry->descriptionFor(id) : id },
+            { QStringLiteral("sequence"), seq },
+            { QStringLiteral("displayText"), display },
+        });
+    }
+    return out;
 }
 
 void GlobalShortcutsPortal::setEnabled(bool enabled)
@@ -240,8 +382,121 @@ void GlobalShortcutsPortal::setState(State state, const QString &detail)
     Q_EMIT stateChanged();
 }
 
+void GlobalShortcutsPortal::setupKdeActions()
+{
+#ifdef KAMINARI_ENABLE_KDE
+    teardownKdeActions(false);
+    m_usingKde = true;
+    const QString component = kdeComponentName();
+    const QString displayName = kdeComponentDisplayName();
+
+    if (!m_activeChangedConn) {
+        m_activeChangedConn = connect(
+            KGlobalAccel::self(),
+            &KGlobalAccel::globalShortcutActiveChanged, this,
+            [this](QAction *action, bool active) {
+                if (!m_usingKde || m_state != Active || !action)
+                    return;
+                const QString id = action->objectName();
+                if (!kdeActionIds().contains(id))
+                    return;
+                if (active)
+                    Q_EMIT activated(id);
+                else
+                    Q_EMIT deactivated(id);
+            });
+    }
+    if (!m_shortcutChangedConn) {
+        m_shortcutChangedConn = connect(
+            KGlobalAccel::self(),
+            &KGlobalAccel::globalShortcutChanged, this,
+            [this](QAction *action, const QKeySequence &) {
+                if (!m_usingKde || !action)
+                    return;
+                if (m_kdeActions.contains(action->objectName()))
+                    Q_EMIT stateChanged();
+            });
+    }
+
+    for (const QString &id : kdeActionIds()) {
+        auto *action = new QAction(this);
+        action->setObjectName(id);
+        action->setText(m_registry ? m_registry->descriptionFor(id) : id);
+        action->setProperty("componentName", component);
+        action->setProperty("componentDisplayName", displayName);
+
+        QList<QKeySequence> defaults;
+        if (m_registry
+            && (actionIds().contains(id)
+                || id == QLatin1String("call.pushToTalk")
+                || id == QLatin1String("app.toggleWindow"))) {
+            const QString portable = m_registry->sequenceFor(id);
+            if (!portable.isEmpty()) {
+                const QKeySequence seq =
+                    QKeySequence::fromString(portable, QKeySequence::PortableText);
+                if (!seq.isEmpty())
+                    defaults << seq;
+            }
+        }
+        KGlobalAccel::self()->setDefaultShortcut(
+            action, defaults, KGlobalAccel::Autoloading);
+        KGlobalAccel::self()->setShortcut(
+            action, defaults, KGlobalAccel::Autoloading);
+        m_kdeActions.insert(id, action);
+    }
+
+    qCInfo(lcGlobalShortcuts)
+        << "registered" << m_kdeActions.size()
+        << "global shortcuts with KGlobalAccel under component" << component;
+    setState(Active);
+#endif
+}
+
+void GlobalShortcutsPortal::teardownKdeActions(bool forgetShortcuts)
+{
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_activeChangedConn) {
+        disconnect(m_activeChangedConn);
+        m_activeChangedConn = {};
+    }
+    if (m_shortcutChangedConn) {
+        disconnect(m_shortcutChangedConn);
+        m_shortcutChangedConn = {};
+    }
+    for (QAction *action : std::as_const(m_kdeActions)) {
+        if (!action)
+            continue;
+        if (forgetShortcuts)
+            KGlobalAccel::self()->removeAllShortcuts(action);
+        delete action;
+    }
+    m_kdeActions.clear();
+#else
+    Q_UNUSED(forgetShortcuts);
+#endif
+    m_usingKde = false;
+}
+
+void GlobalShortcutsPortal::refreshKdeActionTexts()
+{
+#ifdef KAMINARI_ENABLE_KDE
+    if (!m_registry)
+        return;
+    for (auto it = m_kdeActions.constBegin(); it != m_kdeActions.constEnd(); ++it) {
+        if (it.value())
+            it.value()->setText(m_registry->descriptionFor(it.key()));
+    }
+#endif
+}
+
 void GlobalShortcutsPortal::start()
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (useKdeBackend()) {
+        setupKdeActions();
+        return;
+    }
+#endif
 #ifdef HAVE_QT_DBUS
     if (!QDBusConnection::sessionBus().isConnected()) {
         ++m_generation;
@@ -278,6 +533,7 @@ void GlobalShortcutsPortal::beginSession()
 void GlobalShortcutsPortal::teardown()
 {
     ++m_generation;
+    teardownKdeActions(false);
 #ifdef HAVE_QT_DBUS
     delete m_watcher;
     m_watcher = nullptr;
@@ -286,11 +542,13 @@ void GlobalShortcutsPortal::teardown()
         closeSession(m_sessionHandle);
 #endif
     m_sessionHandle.clear();
+    m_portalTriggers.clear();
     m_version = 0;
 }
 
 void GlobalShortcutsPortal::stop()
 {
+    teardownKdeActions(true);
     teardown();
     setState(Off);
 }
@@ -446,6 +704,14 @@ void GlobalShortcutsPortal::bindShortcuts(int generation)
                     ? qdbus_cast<QList<PortalShortcut>>(
                           bound.value<QDBusArgument>())
                     : QList<PortalShortcut>();
+            m_portalTriggers.clear();
+            for (const PortalShortcut &s : list) {
+                const QString desc =
+                    s.properties.value(QStringLiteral("trigger_description"))
+                        .toString();
+                if (!desc.isEmpty())
+                    m_portalTriggers.insert(s.id, desc);
+            }
             if (list.isEmpty())
                 setState(Unavailable,
                          tr("Your desktop did not bind any of the "
@@ -567,6 +833,7 @@ void GlobalShortcutsPortal::onPortalOwnerChanged(const QString &,
     // without this the state would stay Active for ever with no key arriving.
     unsubscribeSession();
     m_sessionHandle.clear();
+    m_portalTriggers.clear();
     m_version = 0;
     if (newOwner.isEmpty()) {
         qCInfo(lcGlobalShortcuts) << "portal went away";
@@ -585,6 +852,7 @@ void GlobalShortcutsPortal::onSessionClosed(const QVariantMap &)
     qCInfo(lcGlobalShortcuts) << "portal closed the session";
     unsubscribeSession();
     m_sessionHandle.clear();
+    m_portalTriggers.clear();
     ++m_generation;
     setState(Failed,
              tr("Your desktop ended the global shortcuts session. Turn this "
@@ -594,6 +862,20 @@ void GlobalShortcutsPortal::onSessionClosed(const QVariantMap &)
 
 void GlobalShortcutsPortal::configure()
 {
+#ifdef KAMINARI_ENABLE_KDE
+    if (m_usingKde) {
+        if (!canConfigure())
+            return;
+        if (!QStandardPaths::findExecutable(QStringLiteral("kcmshell6")).isEmpty()
+            && QProcess::startDetached(QStringLiteral("kcmshell6"),
+                                       { QStringLiteral("kcm_keys") })) {
+            return;
+        }
+        QProcess::startDetached(QStringLiteral("systemsettings"),
+                                { QStringLiteral("kcm_keys") });
+        return;
+    }
+#endif
 #ifdef HAVE_QT_DBUS
     if (!canConfigure())
         return;

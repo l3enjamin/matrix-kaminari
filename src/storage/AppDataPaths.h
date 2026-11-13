@@ -136,6 +136,15 @@ QString quarantineRustStoreWith(const AccountIdentity &identity, RenameFn rename
 
 QStringList legacyRoots();
 
+QString legacyPrimaryRoot();
+
+bool migrateLegacyAppDataIfNeeded();
+
+bool migrateLegacyAppDataIfNeededWith(const QString &legacyRoot,
+                                      const QString &targetRoot,
+                                      const QString &legacyConfigBase,
+                                      const QString &targetConfigBase);
+
 QStringList allRoots();
 
 QStringList findRustStoresIn(const QString &root);

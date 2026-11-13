@@ -1,0 +1,41 @@
+[Global]
+IconName=kaminari
+Name=Kaminari
+Comment=Native Matrix client for KDE Plasma
+DesktopEntry=kaminari.desktop
+
+[Event/message]
+Name=New Message
+Comment=A new message arrived in a conversation
+Action=Popup|Taskbar
+Urgency=Normal
+
+[Event/mention]
+Name=Mention
+Comment=Someone mentioned you or replied to your message
+Action=Popup|Taskbar
+Urgency=Normal
+
+[Event/direct_message]
+Name=Direct Message
+Comment=A new direct message arrived
+Action=Popup|Taskbar
+Urgency=Normal
+
+[Event/incoming_call]
+Name=Incoming Call
+Comment=An incoming voice or video call
+Action=Popup|Taskbar
+Urgency=Critical
+
+[Event/verification_request]
+Name=Device Verification
+Comment=Another session requested emoji or SAS verification
+Action=Popup|Taskbar
+Urgency=Normal
+
+[Event/test]
+Name=Test Notification
+Comment=Notification delivery diagnostic test
+Action=Popup
+Urgency=Normal

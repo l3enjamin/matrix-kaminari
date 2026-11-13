@@ -224,20 +224,27 @@ inline bool verificationNoticeAllowed(bool notificationsEnabled, bool rulesKnown
 inline QString verificationBody(int preview, bool isSelf,
                                 const QString &otherName)
 {
-    if (isPrivate(preview))
-        return QCoreApplication::translate(
+    QString text;
+    if (isPrivate(preview)) {
+        text = QCoreApplication::translate(
             "AppController",
             "A session verification request is waiting. Open Lightning to "
             "review it.");
-    if (isSelf || otherName.isEmpty())
-        return QCoreApplication::translate(
+    } else if (isSelf || otherName.isEmpty()) {
+        text = QCoreApplication::translate(
             "AppController",
             "Another of your sessions wants to verify. Open Lightning to "
             "review it.");
-    return QCoreApplication::translate(
-               "AppController",
-               "%1 wants to verify a session. Open Lightning to review it.")
-        .arg(otherName);
+    } else {
+        text = QCoreApplication::translate(
+                   "AppController",
+                   "%1 wants to verify a session. Open Lightning to review it.")
+                   .arg(otherName);
+    }
+#ifdef KAMINARI_BRANDING
+    text.replace(QStringLiteral("Lightning"), QStringLiteral("Kaminari"));
+#endif
+    return text;
 }
 
 inline QString verificationNoticeKey(const QString &flowId)

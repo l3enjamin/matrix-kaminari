@@ -323,6 +323,8 @@ void ShortcutRegistry::buildTables()
         { QStringLiteral("app.shortcutsHelp"), appCat,
           tr("Show the keyboard shortcuts"), QStringLiteral("Ctrl+/"),
           GlobalContext },
+        { QStringLiteral("app.toggleWindow"), appCat,
+          tr("Show or hide the window"), {}, GlobalContext },
 
         { QStringLiteral("nav.quickSwitcher"), navCat,
           tr("Open the quick switcher"), QStringLiteral("Ctrl+K"),
@@ -514,6 +516,8 @@ void ShortcutRegistry::buildTables()
         { QStringLiteral("call.toggleScreenShare"), callCat,
           tr("Share your screen, or stop sharing"),
           QStringLiteral("Ctrl+Shift+S"), GlobalContext },
+        { QStringLiteral("call.pushToTalk"), callCat,
+          tr("Push to talk (hold)"), {}, GlobalContext },
 
         { QStringLiteral("media.focusPlayer"), mediaCat,
           tr("Focus the audio player"), QStringLiteral("Ctrl+Shift+J"),

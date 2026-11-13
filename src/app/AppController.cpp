@@ -109,8 +109,16 @@
 #include <QStyleHints>
 #include <QUuid>
 #include <QLoggingCategory>
+#include <QProcess>
+#ifdef KAMINARI_BRANDING
+#include <QRegularExpression>
+#endif
 #include <memory>
 #include <type_traits>
+
+#ifdef KAMINARI_ENABLE_KDE
+#include <KWindowSystem>
+#endif
 
 #ifdef Q_OS_UNIX
 #include <sys/resource.h>
@@ -124,6 +132,18 @@ Q_LOGGING_CATEGORY(lcApp, "matrix.app")
 namespace {
 constexpr int kAutomaticUpdateCheckDelayMs =
     int(lightning::update::UpdateManager::kStartupQuietPeriodMs) + 5 * 1000;
+
+QString brandText(const QString &text)
+{
+#ifdef KAMINARI_BRANDING
+    static const QRegularExpression word(QStringLiteral("\\bLightning\\b"));
+    QString out = text;
+    out.replace(word, QStringLiteral("Kaminari"));
+    return out;
+#else
+    return text;
+#endif
+}
 
 std::unique_ptr<SecretStore> makeSecretStore(
     const AppController::SecretStoreFactory &factory, QObject *parent)
@@ -229,6 +249,9 @@ AppController::AppController(Backend backend, bool screenshotDemo,
     connect(AppLocale::instance(), &AppLocale::changed,
             m_settings.get(), &SettingsManager::clockFormatChanged);
     m_customTheme = std::make_unique<CustomThemeStore>(m_settings.get(), this);
+    m_plasmaTheme = std::make_unique<PlasmaThemeWatcher>(this);
+    connect(m_plasmaTheme.get(), &PlasmaThemeWatcher::themeChanged,
+            this, &AppController::systemDarkModeChanged);
     m_networkRoute = std::make_unique<NetworkRouteController>(m_settings.get(), this);
     m_shortcuts = std::make_unique<ShortcutRegistry>(m_settings.get(), this);
     // Its labels are translated when the tables are built, which is before
@@ -580,9 +603,11 @@ AppController::AppController(Backend backend, bool screenshotDemo,
         // A real notification through the normal path. It names nothing of
         // the account: a body is written to the desktop's log in plaintext.
         m_notifications->showGeneric(
-            tr("Lightning"),
+            brandText(tr("Lightning")),
             tr("This is a test notification. If you can read it, desktop "
-               "notifications work."));
+               "notifications work."),
+            QString(), QString(), false, QString(), QString(),
+            QStringLiteral("test"));
     });
     m_forward      = std::make_unique<ForwardController>(this);
     m_bulkRedaction = std::make_unique<BulkRedactionController>(this);
@@ -2786,7 +2811,8 @@ true, ringSeconds, acceptOffered,
                         tr("Verification request"),
                         notices::verificationBody(noticePreviewFor(QString()),
                                                   m_verificationIsSelf, other),
-                        QString(), QString(),false, wantedKey);
+                        QString(), QString(), false, wantedKey, QString(),
+                        QStringLiteral("verification_request"));
                 }
             }
         });
@@ -3275,7 +3301,7 @@ bool AppController::notificationActionIsForCurrentAccount(
     qCWarning(lcApp) << "notification action refused: account changed";
     if (m_notifications && m_settings->notificationsEnabled()) {
         m_notifications->showGeneric(
-            tr("Lightning"),
+            brandText(tr("Lightning")),
             tr("That notification was for a different account, so nothing "
                "was sent. Switch back to that account and try again."));
     }
@@ -4072,12 +4098,18 @@ void AppController::enableCallMediaEngine()
             }
             const bool direct = portalFd < 0;
 #ifdef Q_OS_LINUX
-            if (direct && sandboxenv::isSandboxed()) {
-                if (CameraPortal::available())
+            const bool sandboxed = sandboxenv::isSandboxed();
+            const bool preferPortal =
+                m_settings && m_settings->preferCameraPortal();
+            if (direct && (sandboxed || preferPortal)) {
+                if (CameraPortal::available()) {
                     plan.needsPortal = true;
-                else
+                    return plan;
+                }
+                if (sandboxed) {
                     plan.refusal = QStringLiteral("camera_unavailable");
-                return plan;
+                    return plan;
+                }
             }
 #endif
             const QString source = SfuMediaEngine::cameraSource(portalFd);
@@ -4263,6 +4295,8 @@ bool AppController::initialSyncDone() const
 
 bool AppController::systemDarkMode() const
 {
+    if (m_plasmaTheme && m_plasmaTheme->active())
+        return m_plasmaTheme->isDark();
     if (auto *hints = QGuiApplication::styleHints())
         return hints->colorScheme() == Qt::ColorScheme::Dark;
     return false;
@@ -4762,6 +4796,11 @@ void AppController::resetCustomAppIcon()
 
 void AppController::applyControlPalette(const QVariantMap &roles)
 {
+    if (m_plasmaTheme && m_plasmaTheme->active() && m_settings
+        && m_settings->theme() == SettingsManager::SystemTheme) {
+        m_plasmaTheme->applyApplicationPalette();
+        return;
+    }
     QPalette pal = QGuiApplication::palette();
     const auto set = [&](QPalette::ColorRole role, const char *key) {
         const QVariant v = roles.value(QString::fromLatin1(key));
@@ -4914,11 +4953,35 @@ void AppController::registerMainWindow(QObject *window)
     if (m_mainWindow)
         disconnect(m_mainWindow, nullptr, this, nullptr);
     m_mainWindow = quick;
+    m_tray.setAssociatedWindow(quick);
+    if (m_notifications)
+        m_notifications->setWindow(quick);
     connect(quick, &QWindow::activeChanged, this,
             &AppController::refreshMainWindowState);
     connect(quick, &QWindow::visibilityChanged, this,
             [this](QWindow::Visibility) { refreshMainWindowState(); });
     refreshMainWindowState();
+}
+
+void AppController::openKdeNotificationSettings()
+{
+#ifdef KAMINARI_ENABLE_KDE
+    const QString kcmshell =
+        QStandardPaths::findExecutable(QStringLiteral("kcmshell6"));
+    if (!kcmshell.isEmpty()
+        && QProcess::startDetached(kcmshell,
+                                   { QStringLiteral("kcm_notifications") })) {
+        return;
+    }
+    const QString systemSettings =
+        QStandardPaths::findExecutable(QStringLiteral("systemsettings"));
+    if (!systemSettings.isEmpty()
+        && QProcess::startDetached(systemSettings,
+                                   { QStringLiteral("kcm_notifications") })) {
+        return;
+    }
+    qCWarning(lcApp) << "could not launch KDE notification settings (kcmshell6 / systemsettings not found)";
+#endif
 }
 
 QQuickWindow *AppController::mainWindow()
@@ -4995,12 +5058,22 @@ void AppController::alertMainWindow()
 
 void AppController::activateMainWindowForNotificationClick()
 {
+    const bool hadToken =
+        m_notifications && m_notifications->lastClickHadActivationToken();
+    QQuickWindow *window = mainWindow();
+#ifdef KAMINARI_ENABLE_KDE
+    if (window && hadToken)
+        KWindowSystem::activateWindow(window);
+#endif
     if (!notices::clickNeedsAlertActivation(QGuiApplication::platformName(),
-                                            m_notifications
-                                                && m_notifications->lastClickHadActivationToken()))
+                                            hadToken))
         return;
-    if (QQuickWindow *window = mainWindow())
+    if (window) {
+#ifdef KAMINARI_ENABLE_KDE
+        KWindowSystem::activateWindow(window);
+#endif
         window->alert(0);
+    }
 }
 
 void AppController::noteRtcSessionForRing(const QString &roomId)

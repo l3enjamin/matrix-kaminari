@@ -54,8 +54,12 @@ QtObject {
 
     property bool reducedMotion: false
 
+    readonly property bool plasmaThemeActive:
+        mode === 0
+        && typeof app !== "undefined" && !!app && !!app.plasmaTheme
+        && app.plasmaTheme.active
     readonly property int effectiveTheme: mode === 0
-                                          ? (systemDark ? 9 : 8)
+                                          ? (plasmaThemeActive ? 0 : (systemDark ? 9 : 8))
                                           : mode
     // Coerce a palette value to a color. The custom palette stores "#RRGGBB"
     // strings, which have no .r/.g/.b, so arithmetic on a palette entry must go
@@ -141,10 +145,14 @@ QtObject {
     readonly property real _badgeInkChoiceRatio: 4.6
     readonly property color _badgeDarkInk: "#0B0D12"
 
-    readonly property bool dark: effectiveTheme === 12
-                                 ? relativeLuminance(_asColor(_p.background)) < 0.18
-                                 : (effectiveTheme !== 1 && effectiveTheme !== 7
-                                    && effectiveTheme !== 8)
+    readonly property bool dark: effectiveTheme === 0
+                                 ? (typeof app !== "undefined" && !!app
+                                    && !!app.plasmaTheme && app.plasmaTheme.active
+                                    ? app.plasmaTheme.isDark : systemDark)
+                                 : (effectiveTheme === 12
+                                    ? relativeLuminance(_asColor(_p.background)) < 0.18
+                                    : (effectiveTheme !== 1 && effectiveTheme !== 7
+                                       && effectiveTheme !== 8))
     readonly property bool storm: effectiveTheme === 11
 
     readonly property color _bgLight:            "#D3E1F2"
@@ -617,8 +625,34 @@ QtObject {
         { id: 12, name: qsTr("Your theme") }
     ]
 
+    readonly property var _plasma: {
+        var pt = (typeof app !== "undefined" && !!app && !!app.plasmaTheme
+                  && app.plasmaTheme.active) ? app.plasmaTheme : null
+        if (!pt)
+            return systemDark ? _indigo : _moss
+        return {
+            background: pt.background, rail: pt.rail, sidebar: pt.sidebar,
+            surface: pt.surface, cardElevated: pt.cardElevated, hover: pt.hover,
+            selected: pt.selected, selectedHover: pt.selectedHover,
+            selectedText: pt.selectedText, inputBg: pt.inputBg,
+            codeBlock: pt.codeBlock, textPrimary: pt.textPrimary,
+            textSecondary: pt.textSecondary, textMuted: pt.textMuted,
+            textDisabled: pt.textDisabled, border: pt.border,
+            borderStrong: pt.borderStrong, accent: pt.accent,
+            accentHover: pt.accentHover, accentPressed: pt.accentPressed,
+            accentSoft: pt.accentSoft, accentBorder: pt.accentBorder,
+            accentText: pt.accentText, ownBubble: pt.ownBubble,
+            ownBubbleText: pt.ownBubbleText, otherBubble: pt.otherBubble,
+            reaction: pt.reaction, link: pt.link, unreadBadge: pt.accent,
+            mentionHighlight: pt.mention, mention: pt.mention,
+            online: pt.positive, success: pt.positive, warning: pt.warning,
+            danger: pt.negative, info: pt.info, dangerTint: pt.dangerTint
+        }
+    }
+
     function rawPaletteForTheme(id) {
         switch (id) {
+        case 0:  return _plasma
         case 1:  return _light
         case 2:  return _dark
         case 3:  return _graphite
@@ -656,7 +690,7 @@ QtObject {
 
     function paletteForTheme(id) {
         var p = rawPaletteForTheme(id)
-        var isDark = id === 12
+        var isDark = (id === 0 || id === 12)
                      ? relativeLuminance(_asColor(p.background)) < 0.18
                      : (id !== 1 && id !== 7 && id !== 8)
         var isStorm = id === 11
@@ -1491,6 +1525,8 @@ QtObject {
     readonly property int editorChromeTheme: {
         if (effectiveTheme === 12)
             return (customBase >= 1 && customBase <= 11) ? customBase : 11
+        if (effectiveTheme === 0)
+            return 0
         return (effectiveTheme >= 1 && effectiveTheme <= 11) ? effectiveTheme : 11
     }
     readonly property var _editorPalette: paletteForTheme(editorChromeTheme)

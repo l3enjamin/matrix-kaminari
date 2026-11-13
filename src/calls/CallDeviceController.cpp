@@ -52,6 +52,8 @@ void CallDeviceController::setSettings(SettingsManager *settings)
     if (m_settings) {
         connect(m_settings, &SettingsManager::callDevicePreferenceChanged,
                 this, &CallDeviceController::onDeviceListChanged);
+        connect(m_settings, &SettingsManager::preferCameraPortalChanged,
+                this, &CallDeviceController::onDeviceListChanged);
     }
     Q_EMIT devicesChanged();
     Q_EMIT selectionChanged();
@@ -133,7 +135,8 @@ bool CallDeviceController::hasSpeaker() const
 bool CallDeviceController::camerasChosenByDesktop() const
 {
 #if defined(Q_OS_LINUX)
-    return sandboxenv::isFlatpak();
+    return sandboxenv::isFlatpak()
+        || (m_settings && m_settings->preferCameraPortal());
 #else
     return false;
 #endif

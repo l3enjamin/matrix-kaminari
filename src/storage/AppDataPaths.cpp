@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -23,8 +24,13 @@ namespace {
 
 // Must match setOrganizationName/setApplicationName in src/main.cpp. Changing
 // either orphans existing stores; add the old root to legacyRoots() if so.
+#ifndef KAMINARI_BRANDING
 constexpr QLatin1String kOrganizationName{"MatrixClient"};
 constexpr QLatin1String kApplicationName{"matrix-client"};
+#else
+constexpr QLatin1String kOrganizationName{"Kaminari"};
+constexpr QLatin1String kApplicationName{"kaminari"};
+#endif
 constexpr QLatin1String kRustStoreName{"matrix-rust-sdk-store"};
 constexpr QLatin1String kSmokeSessionName{"matrix-rust-sdk-smoke-session.json"};
 
@@ -703,12 +709,224 @@ QStringList legacyRoots()
     const QString base = appDataBase();
     if (base.isEmpty()) return out;
 
-    const QString legacyDirect = base + QLatin1Char('/') + kApplicationName;
     const QString primary = primaryRoot();
-    if (!legacyDirect.isEmpty() && legacyDirect != primary)
-        out.append(legacyDirect);
+    auto addCandidate = [&out, &primary](const QString &candidate) {
+        if (!candidate.isEmpty() && candidate != primary
+            && !out.contains(candidate)) {
+            out.append(candidate);
+        }
+    };
+
+#ifdef KAMINARI_BRANDING
+    addCandidate(base + QLatin1String("/MatrixClient/matrix-client"));
+    addCandidate(base + QLatin1String("/matrix-client"));
+#endif
+    addCandidate(base + QLatin1Char('/') + kApplicationName);
 
     return out;
+}
+
+QString legacyPrimaryRoot()
+{
+    if (portableActive())
+        return {};
+    const QString base = appDataBase();
+    if (base.isEmpty())
+        return {};
+    return base + QLatin1String("/MatrixClient/matrix-client");
+}
+
+namespace {
+
+Q_LOGGING_CATEGORY(lcLegacyMigration, "matrix.appdatapaths.migration")
+
+QString resolveConfigBase()
+{
+    QString cfg = envValue("XDG_CONFIG_HOME");
+    if (!cfg.isEmpty())
+        return cfg;
+    cfg = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    if (!cfg.isEmpty())
+        return cfg;
+    const QString home = envValue("HOME");
+    return home.isEmpty() ? QString{} : home + QLatin1String("/.config");
+}
+
+bool copyConfigFileIfMissing(const QString &srcPath, const QString &dstPath)
+{
+    const QFileInfo srcInfo(srcPath);
+    if (!srcInfo.exists() || srcInfo.isSymLink() || !srcInfo.isFile())
+        return false;
+    const QFileInfo dstInfo(dstPath);
+    if (dstInfo.exists() || dstInfo.isSymLink())
+        return false;
+
+    const QString dstParent = QFileInfo(dstPath).absolutePath();
+    if (!QDir().mkpath(dstParent)) {
+        qCWarning(lcLegacyMigration)
+            << "Could not create config directory" << dstParent;
+        return false;
+    }
+    QFile::setPermissions(
+        dstParent, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+
+    const QString staging = dstPath + QLatin1String(".kaminari-migrating");
+    QFile::remove(staging);
+    if (!QFile::copy(srcPath, staging)) {
+        qCWarning(lcLegacyMigration)
+            << "Could not stage legacy config copy to" << staging;
+        return false;
+    }
+    QFile::setPermissions(staging, QFile::ReadOwner | QFile::WriteOwner);
+    if (!QFile::rename(staging, dstPath)) {
+        QFile::remove(staging);
+        qCWarning(lcLegacyMigration)
+            << "Could not finalize config migration to" << dstPath;
+        return false;
+    }
+    qCInfo(lcLegacyMigration) << "Migrated legacy config to" << dstPath;
+    return true;
+}
+
+bool isInstanceLockName(const QString &fileName)
+{
+    return fileName.startsWith(QLatin1String("instance-"))
+        && fileName.endsWith(QLatin1String(".lock"));
+}
+
+bool copyDirectoryTree(const QString &srcRoot, const QString &dstRoot)
+{
+    if (!QDir().mkpath(dstRoot))
+        return false;
+    QFile::setPermissions(
+        dstRoot, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+
+    const QDir srcDir(srcRoot);
+    QDirIterator it(srcRoot,
+                    QDir::Dirs | QDir::Files | QDir::Hidden | QDir::System
+                        | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        const QFileInfo info = it.fileInfo();
+        if (info.isSymLink())
+            continue;
+        const QString rel = srcDir.relativeFilePath(info.filePath());
+        if (rel.isEmpty() || rel == QLatin1String(".") || rel.startsWith(QLatin1String("..")))
+            continue;
+        if (isInstanceLockName(info.fileName()))
+            continue;
+
+        const QString target = dstRoot + QLatin1Char('/') + rel;
+        if (info.isDir()) {
+            if (!QDir().mkpath(target))
+                return false;
+            QFile::setPermissions(
+                target, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        } else if (info.isFile()) {
+            const QString parent = QFileInfo(target).absolutePath();
+            if (!QDir().mkpath(parent))
+                return false;
+            QFile::remove(target);
+            if (!QFile::copy(info.filePath(), target))
+                return false;
+            const QFile::Permissions ownerPerms =
+                info.permissions() & (QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+            QFile::setPermissions(
+                target,
+                ownerPerms != QFile::Permissions{}
+                    ? ownerPerms
+                    : (QFile::ReadOwner | QFile::WriteOwner));
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+bool migrateLegacyAppDataIfNeededWith(const QString &legacyRoot,
+                                      const QString &targetRoot,
+                                      const QString &legacyConfigBase,
+                                      const QString &targetConfigBase)
+{
+    bool migratedAnything = false;
+
+    if (!legacyConfigBase.isEmpty() && !targetConfigBase.isEmpty()) {
+        for (const char *ext : {"conf", "ini"}) {
+            const QString srcCfg = legacyConfigBase
+                + QLatin1String("/MatrixClient/matrix-client.")
+                + QLatin1String(ext);
+            const QString dstCfg = targetConfigBase
+                + QLatin1String("/Kaminari/kaminari.")
+                + QLatin1String(ext);
+            if (copyConfigFileIfMissing(srcCfg, dstCfg))
+                migratedAnything = true;
+        }
+    }
+
+    if (legacyRoot.isEmpty() || targetRoot.isEmpty() || legacyRoot == targetRoot)
+        return migratedAnything;
+
+    const QFileInfo legacyInfo(legacyRoot);
+    const QFileInfo targetInfo(targetRoot);
+    if (!legacyInfo.exists() || !legacyInfo.isDir() || legacyInfo.isSymLink())
+        return migratedAnything;
+    if (targetInfo.exists() || targetInfo.isSymLink())
+        return migratedAnything;
+
+    const QString targetParent = QFileInfo(targetRoot).absolutePath();
+    if (!QDir().mkpath(targetParent)) {
+        qCWarning(lcLegacyMigration)
+            << "Could not create profile parent directory" << targetParent;
+        return migratedAnything;
+    }
+    QFile::setPermissions(
+        targetParent, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+
+    const QString staging = targetParent + QLatin1String("/.kaminari-migrating");
+    if (QFileInfo(staging).exists() || QFileInfo(staging).isSymLink()) {
+        if (removeAppDataDir(staging) == DirRemoval::Failed) {
+            qCWarning(lcLegacyMigration)
+                << "Could not clean stale staging directory" << staging;
+            return migratedAnything;
+        }
+    }
+
+    if (!copyDirectoryTree(legacyRoot, staging)) {
+        qCWarning(lcLegacyMigration)
+            << "Failed copying legacy profile into staging directory" << staging;
+        removeAppDataDir(staging);
+        return migratedAnything;
+    }
+
+    if (QFileInfo(targetRoot).exists() || QFileInfo(targetRoot).isSymLink()) {
+        removeAppDataDir(staging);
+        return migratedAnything;
+    }
+
+    if (!QDir().rename(staging, targetRoot)) {
+        qCWarning(lcLegacyMigration)
+            << "Could not move migrated profile into place at" << targetRoot;
+        removeAppDataDir(staging);
+        return migratedAnything;
+    }
+
+    qCInfo(lcLegacyMigration)
+        << "Migrated legacy Lightning profile to" << targetRoot;
+    return true;
+}
+
+bool migrateLegacyAppDataIfNeeded()
+{
+#ifdef KAMINARI_BRANDING
+    if (portableActive())
+        return false;
+    const QString cfg = resolveConfigBase();
+    return migrateLegacyAppDataIfNeededWith(
+        legacyPrimaryRoot(), primaryRoot(), cfg, cfg);
+#else
+    return false;
+#endif
 }
 
 QStringList allRoots()
