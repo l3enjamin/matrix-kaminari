@@ -135,8 +135,8 @@ private:
                              QStringLiteral("chat"), QStringLiteral("shortcuts"),
                              QStringLiteral("privacy"), QStringLiteral("notifications"),
                              QStringLiteral("sound"), QStringLiteral("account"),
-                             QStringLiteral("sessions"), QStringLiteral("labs"),
-                             QStringLiteral("about") });
+                             QStringLiteral("sessions"), QStringLiteral("system"),
+                             QStringLiteral("labs"), QStringLiteral("about") });
             QCoreApplication::processEvents();
         }
     }

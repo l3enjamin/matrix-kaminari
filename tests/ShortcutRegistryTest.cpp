@@ -48,6 +48,8 @@ bool paletteOnly(const QString &id)
         QStringLiteral("thread.openRootInRoom"),
         QStringLiteral("composer.toggleHeight"),
         QStringLiteral("timeline.jumpToLatestAndCompose"),
+        QStringLiteral("app.toggleWindow"),
+        QStringLiteral("call.pushToTalk"),
     };
     return ids.contains(id);
 }

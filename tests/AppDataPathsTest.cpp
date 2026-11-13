@@ -81,12 +81,21 @@ void AppDataPathsTest::composeAppDataRoot_data()
     QTest::addColumn<bool>("portable");
     QTest::addColumn<QString>("expected");
 
+#ifdef KAMINARI_BRANDING
+    QTest::newRow("installed-linux")
+        << QStringLiteral("/home/x/.local/share") << false
+        << QStringLiteral("/home/x/.local/share/Kaminari/kaminari");
+    QTest::newRow("installed-windows")
+        << QStringLiteral("C:/Users/X/AppData/Local") << false
+        << QStringLiteral("C:/Users/X/AppData/Local/Kaminari/kaminari");
+#else
     QTest::newRow("installed-linux")
         << QStringLiteral("/home/x/.local/share") << false
         << QStringLiteral("/home/x/.local/share/MatrixClient/matrix-client");
     QTest::newRow("installed-windows")
         << QStringLiteral("C:/Users/X/AppData/Local") << false
         << QStringLiteral("C:/Users/X/AppData/Local/MatrixClient/matrix-client");
+#endif
     QTest::newRow("portable")
         << QStringLiteral("E:/Lightning/data") << true
         << QStringLiteral("E:/Lightning/data/matrix");

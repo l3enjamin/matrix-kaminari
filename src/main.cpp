@@ -512,6 +512,7 @@ struct PreflightResult {
     bool mockAliasUsed = false;
     bool smokeTestRequested = false;
     bool consoleRequested = false;
+    bool launchMinimized = false;
     QString logFilePath;
     bool screenshotDemo = false;
     QString demoScenario;
@@ -587,6 +588,8 @@ PreflightResult preflightParse(int argc, char *argv[])
                 "  --console            Windows: open a visible diagnostic console\n"
                 "                       for the GUI-subsystem binary. No effect\n"
                 "                       elsewhere.\n"
+                "  --minimized          Start minimized (or hidden in the system tray\n"
+                "                       when a tray is available). Used by autostart.\n"
                 "  --mock               Alias for --backend=mock.\n"
                 "                       Note: --http and --rust are NOT accepted;\n"
                 "                       use --backend=http / --backend=rust instead.\n"
@@ -713,6 +716,10 @@ PreflightResult preflightParse(int argc, char *argv[])
         }
         if (a == QLatin1String("--console")) {
             r.consoleRequested = true;
+            continue;
+        }
+        if (a == QLatin1String("--minimized")) {
+            r.launchMinimized = true;
             continue;
         }
         if (a == QLatin1String("--mock")) {
@@ -2570,6 +2577,11 @@ int main(int argc, char *argv[])
         QGuiApplication::translate("main",
             "Windows: open a visible diagnostic console."));
     parser.addOption(consoleOpt);
+    QCommandLineOption minimizedOpt(
+        QStringLiteral("minimized"),
+        QGuiApplication::translate("main",
+            "Start minimized or hidden in the system tray."));
+    parser.addOption(minimizedOpt);
     QCommandLineOption logFileOpt(
         QStringLiteral("log-file"),
         QGuiApplication::translate("main",
@@ -2616,6 +2628,8 @@ int main(int argc, char *argv[])
 #endif
 
     AppController controller(pf.backend, pf.screenshotDemo);
+    if (pf.launchMinimized)
+        controller.setLaunchMinimized(true);
     controller.enableCallMediaEngine();
     controller.enableCallSounds();
 

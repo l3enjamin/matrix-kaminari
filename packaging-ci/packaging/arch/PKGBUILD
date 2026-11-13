@@ -1,0 +1,63 @@
+# Maintainer: Benjamin <l3enjamin@users.noreply.github.com>
+pkgname=kaminari
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native KDE Plasma / Kirigami Matrix client with E2EE and WebRTC calls"
+arch=('x86_64' 'aarch64')
+url="https://github.com/l3enjamin/matrix-kaminari"
+license=('GPL-3.0-or-later')
+depends=(
+    'qt6-base'
+    'qt6-declarative'
+    'qt6-multimedia'
+    'qt6-svg'
+    'qt6-wayland'
+    'kirigami'
+    'qqc2-desktop-style'
+    'kcolorscheme'
+    'kconfig'
+    'kcoreaddons'
+    'kglobalaccel'
+    'knotifications'
+    'kstatusnotifieritem'
+    'kwindowsystem'
+    'kwallet'
+    'libsecret'
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'hunspell'
+    'openssl'
+    'sqlite'
+)
+makedepends=(
+    'cmake'
+    'ninja'
+    'pkgconf'
+    'rust'
+    'cargo'
+    'extra-cmake-modules'
+    'qt6-tools'
+)
+optdepends=(
+    'kwalletmanager: Manage KDE Wallet secret storage'
+    'xdg-desktop-portal-kde: Native Wayland screen share, camera, and background portals'
+)
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "${srcdir}/${pkgname}-${pkgver}" -B "${srcdir}/build" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DKAMINARI_ENABLE_KDE=ON \
+        -DKAMINARI_BRANDING=ON \
+        -DENABLE_RUST_SDK_BACKEND=ON \
+        -DBUILD_TESTING=OFF
+    cmake --build "${srcdir}/build"
+}
+
+package() {
+    DESTDIR="${pkgdir}" cmake --install "${srcdir}/build"
+}

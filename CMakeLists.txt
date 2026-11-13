@@ -8295,6 +8295,76 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
+if(BUILD_TESTING)
+    qt_add_executable(plasma-theme-watcher-test
+        tests/PlasmaThemeWatcherTest.cpp
+        src/theme/PlasmaThemeWatcher.h
+        src/theme/PlasmaThemeWatcher.cpp
+    )
+    target_include_directories(plasma-theme-watcher-test PRIVATE src)
+    target_link_libraries(plasma-theme-watcher-test PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Test)
+    if(KAMINARI_ENABLE_KDE)
+        target_link_libraries(plasma-theme-watcher-test PRIVATE
+            KF6::ColorScheme KF6::ConfigCore)
+        target_compile_definitions(plasma-theme-watcher-test PRIVATE
+            KAMINARI_ENABLE_KDE=1)
+    endif()
+    add_test(NAME plasma-theme-watcher COMMAND plasma-theme-watcher-test)
+    set_tests_properties(plasma-theme-watcher PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    qt_add_executable(kglobalaccel-backend-test
+        tests/KGlobalAccelBackendTest.cpp
+        src/app/GlobalShortcutsPortal.h
+        src/app/GlobalShortcutsPortal.cpp
+        src/app/ShortcutRegistry.h
+        src/app/ShortcutRegistry.cpp
+        src/app/SettingsManager.h
+        src/app/SettingsManager.cpp
+        src/storage/SecretStore.h
+        src/storage/AppDataPaths.cpp
+        src/storage/PortableMode.cpp
+    )
+    target_include_directories(kglobalaccel-backend-test PRIVATE src)
+    target_link_libraries(kglobalaccel-backend-test PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Test)
+    if(TARGET Qt6::DBus AND NOT WIN32 AND NOT APPLE)
+        target_link_libraries(kglobalaccel-backend-test PRIVATE Qt6::DBus)
+        target_compile_definitions(kglobalaccel-backend-test PRIVATE
+            HAVE_QT_DBUS=1)
+    endif()
+    if(KAMINARI_ENABLE_KDE)
+        target_link_libraries(kglobalaccel-backend-test PRIVATE
+            KF6::GlobalAccel)
+        target_compile_definitions(kglobalaccel-backend-test PRIVATE
+            KAMINARI_ENABLE_KDE=1)
+    endif()
+    add_test(NAME kglobalaccel-backend COMMAND kglobalaccel-backend-test)
+    set_tests_properties(kglobalaccel-backend PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    qt_add_executable(background-portal-test
+        tests/BackgroundPortalTest.cpp
+        src/app/BackgroundPortal.h
+        src/app/BackgroundPortal.cpp
+        src/app/DesktopEntryQuoting.h
+        src/app/DesktopEntryQuoting.cpp
+        src/app/SandboxEnvironment.h
+    )
+    target_include_directories(background-portal-test PRIVATE src)
+    target_link_libraries(background-portal-test PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Test)
+    if(TARGET Qt6::DBus AND NOT WIN32 AND NOT APPLE)
+        target_link_libraries(background-portal-test PRIVATE Qt6::DBus)
+        target_compile_definitions(background-portal-test PRIVATE
+            HAVE_QT_DBUS=1)
+    endif()
+    add_test(NAME background-portal COMMAND background-portal-test)
+    set_tests_properties(background-portal PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 # MPRIS (src/media/MprisServer) must never reach the session bus of whoever
 # runs ctest: an AppController plays a clip in many suites. Every suite
 # carries the opt-out but the MPRIS suite itself, which brings its own

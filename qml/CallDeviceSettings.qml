@@ -450,6 +450,24 @@ ColumnLayout {
     }
 
     SettingsCheckBox {
+        objectName: "preferCameraPortalCheck"
+        palette.windowText: AppTheme.stormText
+        text: qsTr("Choose camera via desktop portal (Wayland)")
+        checked: app.settings.preferCameraPortal
+        onToggled: app.settings.preferCameraPortal = checked
+    }
+    Label {
+        Layout.fillWidth: true
+        wrapMode: Text.WordWrap
+        lineHeight: AppTheme.lineHeightBody
+        lineHeightMode: Text.ProportionalHeight
+        color: AppTheme.stormTextMuted
+        font.pixelSize: AppTheme.textMeta
+        text: qsTr("Ask the desktop portal to pick your camera when turning "
+                   + "video on, instead of enumerating cameras directly.")
+    }
+
+    SettingsCheckBox {
         objectName: "callPictureInPictureCheck"
         palette.windowText: AppTheme.stormText
         text: qsTr("Float the call when Lightning is minimised")

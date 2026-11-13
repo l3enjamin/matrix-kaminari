@@ -61,6 +61,16 @@ private Q_SLOTS:
 
     void desktopFileIsCoherent()
     {
+#ifdef KAMINARI_BRANDING
+        const QString desktop =
+            readAll(QStringLiteral(SOURCE_DIR "/data/kaminari.desktop"));
+        QVERIFY2(!desktop.isEmpty(), "data/kaminari.desktop missing");
+        QVERIFY(desktop.contains(QStringLiteral("Type=Application")));
+        QVERIFY(desktop.contains(QStringLiteral("Name=Kaminari")));
+        QVERIFY(desktop.contains(QStringLiteral("Icon=kaminari")));
+        QVERIFY(desktop.contains(
+            QStringLiteral("Exec=kaminari --backend=rust")));
+#else
         const QString desktop =
             readAll(QStringLiteral(SOURCE_DIR "/data/lightning.desktop"));
         QVERIFY2(!desktop.isEmpty(), "data/lightning.desktop missing");
@@ -69,6 +79,7 @@ private Q_SLOTS:
         QVERIFY(desktop.contains(QStringLiteral("Icon=lightning")));
         QVERIFY(desktop.contains(
             QStringLiteral("Exec=lightning-matrix --backend=rust")));
+#endif
     }
 
     // Qt's xcb plugin takes the WM_CLASS class from the application name and

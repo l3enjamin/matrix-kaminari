@@ -407,6 +407,17 @@ Item {
           breadcrumb: qsTr("Keyboard shortcuts · Message formatting"),
           anchor: "shortcutRow_composer.bold" },
 
+        { title: qsTr("Start automatically on login"),
+          keywords: QT_TR_NOOP("autostart login background portal desktop session minimized"),
+          section: "system",
+          breadcrumb: qsTr("System & permissions"),
+          anchor: "autostartEnabledCheck", platform: "linux" },
+        { title: qsTr("Desktop integration & permissions"),
+          keywords: QT_TR_NOOP("kde plasma portal permissions notifications shortcuts wallet camera"),
+          section: "system",
+          breadcrumb: qsTr("System & permissions"),
+          anchor: "systemIntegrationCard" },
+
         { title: qsTr("Microphone"),
           keywords: QT_TR_NOOP("microphone mic input device voice call audio sound"),
           section: "sound",
@@ -1565,6 +1576,7 @@ Item {
         if (key === "sound") return qsTr("Sound & video")
         if (key === "privacy") return qsTr("Privacy & security")
         if (key === "sessions") return qsTr("Sessions")
+        if (key === "system") return qsTr("System & permissions")
         if (key === "labs") return qsTr("Labs")
         if (key === "updates") return qsTr("Updates")
         if (key === "about") return qsTr("About")
@@ -1580,6 +1592,7 @@ Item {
         if (key === "sound") return "volume_up"
         if (key === "privacy") return "verified_user"
         if (key === "sessions") return "devices"
+        if (key === "system") return "settings"
         if (key === "labs") return "science"
         if (key === "updates") return "download"
         if (key === "about") return "info"
@@ -2484,7 +2497,7 @@ Item {
                     SettingsNavGroupLabel {
                         objectName: "settingsNavGroup_behavior"
                         text: qsTr("Behavior")
-                        shown: root.navGroupShown(["notifications", "sound", "labs"])
+                        shown: root.navGroupShown(["notifications", "sound", "system", "labs"])
                     }
                     SettingsNavRow {
                         sectionKey: "notifications"
@@ -2498,6 +2511,11 @@ Item {
                         navLabel: qsTr("Sound & video")
                     }
                     SettingsNavOutlineFor { sectionKey: "sound" }
+                    SettingsNavRow {
+                        sectionKey: "system"
+                        iconName: "settings"
+                        navLabel: qsTr("System & permissions")
+                    }
                     SettingsNavRow {
                         sectionKey: "labs"
                         iconName: "science"
@@ -5643,6 +5661,35 @@ Item {
                                     visible: app.globalShortcuts.canConfigure
                                     text: qsTr("Change the keys in your desktop's settings")
                                     onClicked: app.globalShortcuts.configure()
+                                }
+                                Label {
+                                    objectName: "globalShortcutsBackendLabel"
+                                    visible: app.settings.globalShortcutsEnabled
+                                             && app.globalShortcuts.backendName.length > 0
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: AppTheme.spacing4
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.WordWrap
+                                    color: AppTheme.stormTextMuted
+                                    font.pixelSize: AppTheme.settingsHintSize
+                                    text: qsTr("Backend: %1").arg(app.globalShortcuts.backendName)
+                                }
+                                Repeater {
+                                    model: app.settings.globalShortcutsEnabled
+                                           ? app.globalShortcuts.activeBindings : []
+                                    delegate: Label {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: AppTheme.spacing8
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormTextSecondary
+                                        font.pixelSize: AppTheme.settingsHintSize
+                                        text: modelData.description + ": "
+                                              + (modelData.trigger && modelData.trigger.length > 0
+                                                 ? modelData.trigger
+                                                 : qsTr("Not bound"))
+                                    }
                                 }
                             }
                         }
@@ -10610,6 +10657,215 @@ Item {
                                 }
                             }
                         }
+                        }
+                    }
+
+                    Loader {
+                        Layout.fillWidth: true
+                        active: root.sectionLive("system")
+                        visible: root.section === "system"
+                        sourceComponent: ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: AppTheme.spacing12
+
+                            Label {
+                                text: qsTr("System & permissions")
+                                color: AppTheme.settingsHeading
+                                font.pixelSize: AppTheme.textTitle
+                                font.weight: AppTheme.weightBold
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("Autostart, desktop integration status, and KDE Plasma settings.")
+                                color: AppTheme.stormTextMuted
+                                font.pixelSize: AppTheme.settingsOptionSize
+                                wrapMode: Text.WordWrap
+                                lineHeight: AppTheme.lineHeightBody
+                                lineHeightMode: Text.ProportionalHeight
+                            }
+
+                            SettingsGroupLabel {
+                                text: qsTr("Startup")
+                            }
+                            SettingsCard {
+                                objectName: "systemStartupCard"
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: AppTheme.spacing8
+                                    SettingsCheckBox {
+                                        objectName: "autostartEnabledCheck"
+                                        palette.windowText: AppTheme.stormText
+                                        text: qsTr("Start automatically on login (minimized)")
+                                        checked: app.settings.autostartEnabled
+                                        enabled: !app.backgroundPortal.busy
+                                        onToggled: app.settings.autostartEnabled = checked
+                                    }
+                                    Label {
+                                        objectName: "autostartStatusLabel"
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: AppTheme.spacing4
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormTextSecondary
+                                        font.pixelSize: AppTheme.settingsHintSize
+                                        text: app.backgroundPortal.statusText
+                                    }
+                                    Label {
+                                        objectName: "autostartFilePathLabel"
+                                        visible: app.backgroundPortal.autostartFilePath.length > 0
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: AppTheme.spacing4
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WrapAnywhere
+                                        color: AppTheme.stormTextMuted
+                                        font.pixelSize: AppTheme.settingsHintSize
+                                        text: app.backgroundPortal.autostartFilePath
+                                    }
+                                }
+                            }
+
+                            SettingsGroupLabel {
+                                text: qsTr("Desktop integration")
+                            }
+                            SettingsCard {
+                                objectName: "systemIntegrationCard"
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: AppTheme.spacing8
+                                    readonly property var integration: app.desktopIntegrationStatus
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Plasma theme: %1").arg(
+                                            parent.integration.plasmaThemeActive
+                                                ? (parent.integration.plasmaSchemeName || qsTr("Active"))
+                                                : qsTr("Inactive"))
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Status notifier: %1 (%2)").arg(
+                                            parent.integration.trayAvailable
+                                                ? qsTr("Available")
+                                                : qsTr("Unavailable"),
+                                            parent.integration.trayBackend || qsTr("none"))
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Notifications: %1").arg(
+                                            parent.integration.notificationsBackend || qsTr("none"))
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Global shortcuts: %1").arg(
+                                            parent.integration.globalShortcutsStatus
+                                                || parent.integration.globalShortcutsBackend
+                                                || qsTr("Off"))
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Secret store: %1").arg(
+                                            parent.integration.secretBackend || qsTr("Unknown"))
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormText
+                                        font.pixelSize: AppTheme.settingsOptionSize
+                                        text: qsTr("Camera portal: %1").arg(
+                                            parent.integration.cameraPortalAvailable
+                                                ? (parent.integration.preferCameraPortal
+                                                       ? qsTr("Available (preferred)")
+                                                       : qsTr("Available"))
+                                                : qsTr("Unavailable"))
+                                    }
+                                    AppButton {
+                                        objectName: "refreshDesktopIntegrationButton"
+                                        storm: true
+                                        size: "sm"
+                                        text: qsTr("Refresh status")
+                                        onClicked: app.refreshDesktopIntegrationStatus()
+                                    }
+                                }
+                            }
+
+                            SettingsGroupLabel {
+                                visible: app.kdeEnabled || app.desktopIntegrationStatus.kdeSession
+                                text: qsTr("KDE System Settings")
+                            }
+                            SettingsCard {
+                                objectName: "kdeSystemSettingsCard"
+                                visible: app.kdeEnabled || app.desktopIntegrationStatus.kdeSession
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: AppTheme.spacing8
+                                    Label {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        color: AppTheme.stormTextMuted
+                                        font.pixelSize: AppTheme.settingsHintSize
+                                        text: qsTr("Open Plasma System Settings modules to adjust permissions, global hotkeys, notifications, autostart, or KWallet.")
+                                    }
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        spacing: AppTheme.spacing8
+                                        AppButton {
+                                            objectName: "openKdeShortcutsButton"
+                                            storm: true
+                                            size: "sm"
+                                            text: qsTr("Global Shortcuts")
+                                            onClicked: app.openKdeShortcutsSettings()
+                                        }
+                                        AppButton {
+                                            objectName: "openKdeNotificationsButton"
+                                            storm: true
+                                            size: "sm"
+                                            text: qsTr("Notifications")
+                                            onClicked: app.openKdeNotificationSettings()
+                                        }
+                                        AppButton {
+                                            objectName: "openKdeAutostartButton"
+                                            storm: true
+                                            size: "sm"
+                                            text: qsTr("Autostart")
+                                            onClicked: app.openKdeAutostartSettings()
+                                        }
+                                        AppButton {
+                                            objectName: "openKdePermissionsButton"
+                                            storm: true
+                                            size: "sm"
+                                            text: qsTr("App Permissions")
+                                            onClicked: app.openKdePermissionsSettings()
+                                        }
+                                        AppButton {
+                                            objectName: "openKdeWalletButton"
+                                            storm: true
+                                            size: "sm"
+                                            text: qsTr("KDE Wallet")
+                                            onClicked: app.openKdeWalletSettings()
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

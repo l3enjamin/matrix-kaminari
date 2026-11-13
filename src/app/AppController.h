@@ -27,6 +27,7 @@
 #include "spaces/RailLayoutStore.h"
 #include "i18n/LocalizationManager.h"
 #include "app/GlobalShortcutsPortal.h"
+#include "app/BackgroundPortal.h"
 #include "app/ShortcutRegistry.h"
 #include "auth/AccountManager.h"
 #include "auth/AuthManager.h"
@@ -118,6 +119,7 @@
 #include <QObject>
 #include <QRect>
 #include <QString>
+#include <QVariantMap>
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
@@ -274,6 +276,10 @@ class AppController : public QObject
     Q_PROPERTY(SettingsManager* settings READ settings CONSTANT)
     Q_PROPERTY(ShortcutRegistry* shortcuts READ shortcuts CONSTANT)
     Q_PROPERTY(GlobalShortcutsPortal* globalShortcuts READ globalShortcuts CONSTANT)
+    Q_PROPERTY(BackgroundPortal* backgroundPortal READ backgroundPortal CONSTANT)
+    Q_PROPERTY(bool launchMinimized READ launchMinimized CONSTANT)
+    Q_PROPERTY(QVariantMap desktopIntegrationStatus READ desktopIntegrationStatus
+               NOTIFY desktopIntegrationStatusChanged)
     Q_PROPERTY(LocalizationManager* localization READ localization CONSTANT)
     Q_PROPERTY(CustomThemeStore* customTheme READ customTheme CONSTANT)
     Q_PROPERTY(PlasmaThemeWatcher* plasmaTheme READ plasmaTheme CONSTANT)
@@ -540,6 +546,11 @@ public:
     SettingsManager *settings() const;
     ShortcutRegistry *shortcuts() const;
     GlobalShortcutsPortal *globalShortcuts() const { return m_globalShortcuts.get(); }
+    BackgroundPortal *backgroundPortal() const { return m_backgroundPortal.get(); }
+    bool launchMinimized() const { return m_launchMinimized; }
+    void setLaunchMinimized(bool minimized) { m_launchMinimized = minimized; }
+    QVariantMap desktopIntegrationStatus() const;
+    Q_INVOKABLE void refreshDesktopIntegrationStatus();
     LocalizationManager *localization() const;
     CustomThemeStore *customTheme() const;
     PlasmaThemeWatcher *plasmaTheme() const { return m_plasmaTheme.get(); }
@@ -770,7 +781,12 @@ public Q_SLOTS:
     Q_INVOKABLE bool spaceIsMuted(const QString &spaceId) const;
     Q_INVOKABLE void markSpaceRead(const QString &spaceId);
     Q_INVOKABLE void registerMainWindow(QObject *window);
-    Q_INVOKABLE void openKdeNotificationSettings();
+    Q_INVOKABLE bool openKdeNotificationSettings();
+    Q_INVOKABLE bool openKdeKcm(const QString &kcm);
+    Q_INVOKABLE bool openKdeShortcutsSettings();
+    Q_INVOKABLE bool openKdeAutostartSettings();
+    Q_INVOKABLE bool openKdePermissionsSettings();
+    Q_INVOKABLE bool openKdeWalletSettings();
     static bool focusBelongsToMainWindow(const QWindow *main,
                                          const QWindow *focus);
     Q_INVOKABLE quint64 jumpToDate(qint64 timestampMs);
@@ -1028,6 +1044,10 @@ Q_SIGNALS:
     void roomKeyImportStateChanged();
     void callGateRevisionChanged();
     void roomKeyImportCompleted(int imported, int total, int affectedRooms);
+    void desktopIntegrationStatusChanged();
+    void toggleWindowRequested();
+    void quickSwitcherRequested();
+    void markCurrentRoomReadRequested();
 
 private:
     QString spaceMutePriorKey(const QString &roomId) const;
@@ -1491,6 +1511,16 @@ private:
 
     bool m_animationsSuspended = false;
     void refreshAnimationsSuspended();
+    bool m_launchMinimized = false;
+    bool m_pttGroupActive = false;
+    bool m_pttGroupRestoreMuted = false;
+    bool m_pttLegacyActive = false;
+    bool m_pttLegacyRestoreMuted = false;
+    void startPushToTalk();
+    void stopPushToTalk();
+    void clearPushToTalkState();
+    static bool launchKdeKcm(const QString &kcm);
+    std::unique_ptr<BackgroundPortal> m_backgroundPortal;
     // MPRIS for the voice/audio player. Declared last so it is destroyed
     // first, before the player it reads.
     std::unique_ptr<MprisServer> m_mpris;

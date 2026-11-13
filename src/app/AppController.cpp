@@ -266,6 +266,24 @@ AppController::AppController(Backend backend, bool screenshotDemo,
                     m_settings->globalShortcutsEnabled());
             });
     m_globalShortcuts->setEnabled(m_settings->globalShortcutsEnabled());
+    m_backgroundPortal = std::make_unique<BackgroundPortal>(this);
+    m_backgroundPortal->syncInitial(m_settings->autostartEnabled());
+    connect(m_settings.get(), &SettingsManager::autostartEnabledChanged,
+            this, [this] {
+                if (m_backgroundPortal)
+                    m_backgroundPortal->setAutostart(
+                        m_settings->autostartEnabled());
+            });
+    connect(m_backgroundPortal.get(), &BackgroundPortal::stateChanged,
+            this, &AppController::desktopIntegrationStatusChanged);
+    connect(this, &AppController::trayAvailableChanged,
+            this, &AppController::desktopIntegrationStatusChanged);
+    connect(m_globalShortcuts.get(), &GlobalShortcutsPortal::stateChanged,
+            this, &AppController::desktopIntegrationStatusChanged);
+    connect(m_plasmaTheme.get(), &PlasmaThemeWatcher::themeChanged,
+            this, &AppController::desktopIntegrationStatusChanged);
+    connect(m_settings.get(), &SettingsManager::secretBackendChanged,
+            this, &AppController::desktopIntegrationStatusChanged);
     m_railLayout = std::make_unique<RailLayoutStore>(m_settings.get(), this);
     m_railEntries = std::make_unique<RailEntryModel>(this);
     m_mediaVisibility = std::make_unique<MediaVisibilityStore>(this);
@@ -1480,6 +1498,46 @@ AppController::AppController(Backend backend, bool screenshotDemo,
             m_forward->cancelSelecting();
         if (m_bulkRedaction)
             m_bulkRedaction->cancel();
+    });
+
+    if (m_globalShortcuts) {
+        connect(m_globalShortcuts.get(), &GlobalShortcutsPortal::activated,
+                this, [this](const QString &actionId) {
+                    if (actionId == QLatin1String("call.pushToTalk")) {
+                        startPushToTalk();
+                    } else if (actionId == QLatin1String("app.toggleWindow")) {
+                        Q_EMIT toggleWindowRequested();
+                    } else if (actionId == QLatin1String("nav.quickSwitcher")) {
+                        Q_EMIT quickSwitcherRequested();
+                    } else if (actionId == QLatin1String("room.markRead")) {
+                        Q_EMIT markCurrentRoomReadRequested();
+                    }
+                });
+        connect(m_globalShortcuts.get(), &GlobalShortcutsPortal::deactivated,
+                this, [this](const QString &actionId) {
+                    if (actionId == QLatin1String("call.pushToTalk"))
+                        stopPushToTalk();
+                });
+        connect(m_globalShortcuts.get(), &GlobalShortcutsPortal::stateChanged,
+                this, [this] {
+                    if (!m_globalShortcuts
+                        || m_globalShortcuts->state()
+                            != GlobalShortcutsPortal::Active) {
+                        clearPushToTalkState();
+                    }
+                });
+    }
+    connect(m_calls.get(), &CallController::stateChanged, this, [this] {
+        if (!m_calls || !m_calls->sessionLive()) {
+            m_pttLegacyActive = false;
+            m_pttLegacyRestoreMuted = false;
+        }
+    });
+    connect(m_groupCall.get(), &SfuCallController::stateChanged, this, [this] {
+        if (!m_groupCall || !m_groupCall->active()) {
+            m_pttGroupActive = false;
+            m_pttGroupRestoreMuted = false;
+        }
     });
 
     connect(m_calls.get(), &CallController::callStartedNotice, this,
@@ -4963,25 +5021,176 @@ void AppController::registerMainWindow(QObject *window)
     refreshMainWindowState();
 }
 
-void AppController::openKdeNotificationSettings()
+bool AppController::launchKdeKcm(const QString &kcm)
 {
 #ifdef KAMINARI_ENABLE_KDE
+    if (kcm.isEmpty())
+        return false;
     const QString kcmshell =
         QStandardPaths::findExecutable(QStringLiteral("kcmshell6"));
     if (!kcmshell.isEmpty()
-        && QProcess::startDetached(kcmshell,
-                                   { QStringLiteral("kcm_notifications") })) {
-        return;
+        && QProcess::startDetached(kcmshell, { kcm })) {
+        return true;
     }
     const QString systemSettings =
         QStandardPaths::findExecutable(QStringLiteral("systemsettings"));
     if (!systemSettings.isEmpty()
-        && QProcess::startDetached(systemSettings,
-                                   { QStringLiteral("kcm_notifications") })) {
-        return;
+        && QProcess::startDetached(systemSettings, { kcm })) {
+        return true;
     }
-    qCWarning(lcApp) << "could not launch KDE notification settings (kcmshell6 / systemsettings not found)";
+    qCWarning(lcApp) << "could not launch KDE KCM" << kcm
+                     << "(kcmshell6 / systemsettings not found)";
+#else
+    Q_UNUSED(kcm);
 #endif
+    return false;
+}
+
+bool AppController::openKdeKcm(const QString &kcm)
+{
+    return launchKdeKcm(kcm);
+}
+
+bool AppController::openKdeNotificationSettings()
+{
+    return launchKdeKcm(QStringLiteral("kcm_notifications"));
+}
+
+bool AppController::openKdeShortcutsSettings()
+{
+    return launchKdeKcm(QStringLiteral("kcm_keys"));
+}
+
+bool AppController::openKdeAutostartSettings()
+{
+    return launchKdeKcm(QStringLiteral("kcm_autostart"));
+}
+
+bool AppController::openKdePermissionsSettings()
+{
+    return launchKdeKcm(QStringLiteral("kcm_permissions"));
+}
+
+bool AppController::openKdeWalletSettings()
+{
+    if (launchKdeKcm(QStringLiteral("kcm_kwallet")))
+        return true;
+#ifdef KAMINARI_ENABLE_KDE
+    const QString manager =
+        QStandardPaths::findExecutable(QStringLiteral("kwalletmanager5"));
+    if (!manager.isEmpty() && QProcess::startDetached(manager, {}))
+        return true;
+    const QString manager6 =
+        QStandardPaths::findExecutable(QStringLiteral("kwalletmanager"));
+    if (!manager6.isEmpty() && QProcess::startDetached(manager6, {}))
+        return true;
+#endif
+    return false;
+}
+
+QVariantMap AppController::desktopIntegrationStatus() const
+{
+    QVariantMap status;
+    const QString desktop =
+        QString::fromUtf8(qgetenv("XDG_CURRENT_DESKTOP")).toLower();
+    const bool kdeSession = desktop.contains(QLatin1String("kde"))
+        || desktop.contains(QLatin1String("plasma"))
+        || !qEnvironmentVariableIsEmpty("KDE_FULL_SESSION");
+    status.insert(QStringLiteral("kdeEnabled"), kdeEnabled());
+    status.insert(QStringLiteral("kdeSession"), kdeSession);
+    status.insert(QStringLiteral("plasmaThemeActive"),
+                  m_plasmaTheme && m_plasmaTheme->active());
+    status.insert(QStringLiteral("plasmaSchemeName"),
+                  m_plasmaTheme ? m_plasmaTheme->schemeName() : QString());
+    status.insert(QStringLiteral("trayAvailable"), m_trayAvailable);
+    status.insert(QStringLiteral("trayBackend"), m_tray.backendName());
+    status.insert(QStringLiteral("notificationsBackend"),
+                  m_notifications ? m_notifications->backendName()
+                                  : QStringLiteral("none"));
+    status.insert(QStringLiteral("globalShortcutsBackend"),
+                  m_globalShortcuts ? m_globalShortcuts->backendName()
+                                    : QStringLiteral("off"));
+    status.insert(QStringLiteral("globalShortcutsStatus"),
+                  m_globalShortcuts ? m_globalShortcuts->statusText()
+                                    : QString());
+    status.insert(QStringLiteral("globalShortcutsActive"),
+                  m_globalShortcuts
+                      && m_globalShortcuts->state()
+                          == GlobalShortcutsPortal::Active);
+    status.insert(QStringLiteral("autostartBackend"),
+                  m_backgroundPortal ? m_backgroundPortal->backendName()
+                                     : QStringLiteral("disabled"));
+    status.insert(QStringLiteral("autostartActive"),
+                  m_backgroundPortal && m_backgroundPortal->active());
+    status.insert(QStringLiteral("autostartStatus"),
+                  m_backgroundPortal ? m_backgroundPortal->statusText()
+                                     : QString());
+    status.insert(QStringLiteral("secretBackend"),
+                  m_settings ? m_settings->secretBackendName() : QString());
+    status.insert(QStringLiteral("secretsSecure"),
+                  m_settings && m_settings->secretsAreSecure());
+#ifdef HAVE_LIGHTNING_WEBRTC
+    status.insert(QStringLiteral("cameraPortalAvailable"),
+                  CameraPortal::available());
+#else
+    status.insert(QStringLiteral("cameraPortalAvailable"), false);
+#endif
+    status.insert(QStringLiteral("preferCameraPortal"),
+                  m_settings && m_settings->preferCameraPortal());
+    return status;
+}
+
+void AppController::refreshDesktopIntegrationStatus()
+{
+    refreshTrayAvailability();
+    if (m_backgroundPortal)
+        m_backgroundPortal->refresh();
+    Q_EMIT desktopIntegrationStatusChanged();
+}
+
+void AppController::startPushToTalk()
+{
+    if (m_groupCall && m_groupCall->active()) {
+        if (!m_groupCall->deafened() && !m_pttGroupActive) {
+            m_pttGroupRestoreMuted = m_groupCall->microphoneMuted();
+            m_pttGroupActive = true;
+            if (m_pttGroupRestoreMuted)
+                m_groupCall->setMicrophoneMuted(false);
+        }
+    }
+    if (m_calls && m_calls->sessionLive()) {
+        if (!m_calls->deafened() && !m_pttLegacyActive) {
+            m_pttLegacyRestoreMuted = m_calls->microphoneMuted();
+            m_pttLegacyActive = true;
+            if (m_pttLegacyRestoreMuted)
+                m_calls->setMicrophoneMuted(false);
+        }
+    }
+}
+
+void AppController::stopPushToTalk()
+{
+    if (m_pttGroupActive) {
+        if (m_groupCall && m_groupCall->active() && !m_groupCall->deafened()
+            && m_pttGroupRestoreMuted) {
+            m_groupCall->setMicrophoneMuted(true);
+        }
+        m_pttGroupActive = false;
+        m_pttGroupRestoreMuted = false;
+    }
+    if (m_pttLegacyActive) {
+        if (m_calls && m_calls->sessionLive() && !m_calls->deafened()
+            && m_pttLegacyRestoreMuted) {
+            m_calls->setMicrophoneMuted(true);
+        }
+        m_pttLegacyActive = false;
+        m_pttLegacyRestoreMuted = false;
+    }
+}
+
+void AppController::clearPushToTalkState()
+{
+    stopPushToTalk();
 }
 
 QQuickWindow *AppController::mainWindow()
@@ -6470,6 +6679,35 @@ QString AppController::logExportDiagnostics() const
 #else
     out += QStringLiteral("call_media_engine_built_in: no\n");
 #endif
+    const QVariantMap desktop = desktopIntegrationStatus();
+    out += QStringLiteral("kde_enabled: %1\n")
+               .arg(desktop.value(QStringLiteral("kdeEnabled")).toBool()
+                        ? QStringLiteral("yes")
+                        : QStringLiteral("no"));
+    out += QStringLiteral("kde_session: %1\n")
+               .arg(desktop.value(QStringLiteral("kdeSession")).toBool()
+                        ? QStringLiteral("yes")
+                        : QStringLiteral("no"));
+    out += QStringLiteral("plasma_theme_active: %1\n")
+               .arg(desktop.value(QStringLiteral("plasmaThemeActive")).toBool()
+                        ? QStringLiteral("yes")
+                        : QStringLiteral("no"));
+    out += QStringLiteral("tray_backend: %1\n")
+               .arg(desktop.value(QStringLiteral("trayBackend")).toString());
+    out += QStringLiteral("notifications_backend: %1\n")
+               .arg(desktop.value(QStringLiteral("notificationsBackend")).toString());
+    out += QStringLiteral("global_shortcuts_backend: %1\n")
+               .arg(desktop.value(QStringLiteral("globalShortcutsBackend")).toString());
+    out += QStringLiteral("global_shortcuts_active: %1\n")
+               .arg(desktop.value(QStringLiteral("globalShortcutsActive")).toBool()
+                        ? QStringLiteral("yes")
+                        : QStringLiteral("no"));
+    out += QStringLiteral("autostart_backend: %1\n")
+               .arg(desktop.value(QStringLiteral("autostartBackend")).toString());
+    out += QStringLiteral("prefer_camera_portal: %1\n")
+               .arg(desktop.value(QStringLiteral("preferCameraPortal")).toBool()
+                        ? QStringLiteral("yes")
+                        : QStringLiteral("no"));
     out += QStringLiteral("\n");
     out += sessionDiagnosticsText();
     return out;
@@ -6706,6 +6944,7 @@ void AppController::applyTrayState()
         refreshTrayAccountLabel();
         refreshTrayUnread();
     }
+    Q_EMIT desktopIntegrationStatusChanged();
 }
 
 void AppController::refreshTrayAccountLabel()
@@ -6760,6 +6999,7 @@ void AppController::refreshTrayUnread()
 
 void AppController::onLoggedOut()
 {
+    clearPushToTalkState();
     m_currentRoomId.clear();
     m_externalMatrixLink.clear();
     ++m_currentRoomOpenSerial;

@@ -201,7 +201,11 @@ private Q_SLOTS:
         const auto decision =
             NotificationManager::decide(incomingText(), context);
         QVERIFY(decision.notify);
+#ifdef KAMINARI_BRANDING
+        QCOMPARE(decision.title, QStringLiteral("Kaminari"));
+#else
         QCOMPARE(decision.title, QStringLiteral("Lightning"));
+#endif
         QVERIFY(!decision.body.contains(QStringLiteral("Bob")));
         QVERIFY(!decision.body.contains(QStringLiteral("hello")));
         QVERIFY(!decision.body.contains(QStringLiteral("Lightning Dev")));

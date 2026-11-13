@@ -145,11 +145,13 @@ AppMainWindow {
         // startMinimized and startInTray, so it comes first.
         if (app.settings && app.settings.initialWindowMaximized)
             window.visibility = Window.Maximized
-        if (app.settings && app.settings.startMinimized)
+        if ((app.settings && app.settings.startMinimized)
+                || (app.launchMinimized && !app.trayAvailable))
             window.visibility = Window.Minimized
         // Start in the tray only if a tray exists; SettingsManager::startInTray
         // also requires closeToTray, so the window can always be brought back.
-        if (app.settings && app.settings.startInTray && app.trayAvailable)
+        if ((app.launchMinimized || (app.settings && app.settings.startInTray))
+                && app.trayAvailable)
             window.hide()
         geometrySaver.armed = true
     }
@@ -235,6 +237,24 @@ AppMainWindow {
         function onTrayShowRequested() {
             // `visible = true`, never show(); see raiseIntoView().
             window.raiseIntoView()
+        }
+        function onToggleWindowRequested() {
+            if (window.visible && window.visibility !== Window.Minimized
+                    && window.visibility !== Window.Hidden) {
+                if (app.trayAvailable) {
+                    window.hiddenByClose = true
+                    window.hide()
+                } else {
+                    window.showMinimized()
+                }
+            } else {
+                window.raiseIntoView()
+                app.activateMainWindowForNotificationClick()
+            }
+        }
+        function onQuickSwitcherRequested() {
+            window.raiseIntoView()
+            app.activateMainWindowForNotificationClick()
         }
     }
 

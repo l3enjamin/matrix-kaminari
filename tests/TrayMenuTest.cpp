@@ -26,10 +26,17 @@ private slots:
         QCOMPARE(tray.contextMenu(), menu);
         QAction *show = nullptr;
         QAction *quit = nullptr;
+#ifdef KAMINARI_BRANDING
+        const QString expectedShow = QStringLiteral("Show Kaminari");
+        const QString expectedQuit = QStringLiteral("Quit Kaminari");
+#else
+        const QString expectedShow = QStringLiteral("Show Lightning");
+        const QString expectedQuit = QStringLiteral("Quit Lightning");
+#endif
         for (QAction *action : menu->actions()) {
-            if (action->text() == QStringLiteral("Show Lightning"))
+            if (action->text() == expectedShow)
                 show = action;
-            else if (action->text() == QStringLiteral("Quit Lightning"))
+            else if (action->text() == expectedQuit)
                 quit = action;
         }
         QVERIFY2(show && quit, "the tray menu offers Show and Quit");
@@ -48,8 +55,13 @@ private slots:
         const QString dotOnly = TrayIcon::tooltipText(QString(), 0, true);
         QVERIFY2(dotOnly.contains(QLatin1Char('\n')), qPrintable(dotOnly));
         QVERIFY(dotOnly.contains(QStringLiteral("Unread messages")));
+#ifdef KAMINARI_BRANDING
+        QCOMPARE(TrayIcon::tooltipText(QString(), 0, false),
+                 QStringLiteral("Kaminari"));
+#else
         QCOMPARE(TrayIcon::tooltipText(QString(), 0, false),
                  QStringLiteral("Lightning"));
+#endif
         QVERIFY(TrayIcon::tooltipText(QStringLiteral("@a:b"), 3, true)
                     .contains(QStringLiteral("3")));
     }
@@ -67,8 +79,13 @@ private slots:
         acts[1]->setText(QStringLiteral("stale"));
         QEvent change(QEvent::LanguageChange);
         QCoreApplication::sendEvent(qApp, &change);
+#ifdef KAMINARI_BRANDING
+        QCOMPARE(acts[0]->text(), QStringLiteral("Show Kaminari"));
+        QCOMPARE(acts[1]->text(), QStringLiteral("Quit Kaminari"));
+#else
         QCOMPARE(acts[0]->text(), QStringLiteral("Show Lightning"));
         QCOMPARE(acts[1]->text(), QStringLiteral("Quit Lightning"));
+#endif
     }
 
     void aMacControlClickIsASecondaryClick()

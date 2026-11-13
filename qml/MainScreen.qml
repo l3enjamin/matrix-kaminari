@@ -170,6 +170,17 @@ Item {
                 shellRoot.leaveCallAction()
         }
     }
+    Connections {
+        target: app
+        function onQuickSwitcherRequested() {
+            if (app.loggedIn && !quickSwitcher.visible)
+                quickSwitcher.open()
+        }
+        function onMarkCurrentRoomReadRequested() {
+            if (app.loggedIn && app.currentRoomId !== "")
+                app.roomList.markRoomRead(app.currentRoomId)
+        }
+    }
 
     Shortcut {
         sequences: {
